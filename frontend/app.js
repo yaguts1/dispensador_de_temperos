@@ -60,7 +60,7 @@ class App {
   toast(message, type = '') {
     const t = this.els.toast;
     t.textContent = message;
-    const color = type === 'err' ? 'var(--color-danger)' : (type === 'ok' ? 'var(--color-success)' : 'var(--color-text)');
+    const color = type === 'err' ? 'var(--color-danger)' : (type === 'ok' ? 'var(--color-success)' : 'var(--color-ink)');
     t.style.backgroundColor = color;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2500);
@@ -87,7 +87,6 @@ class App {
 
     const renderSelect = (options, attrs = {}) => {
       const select = document.createElement('select');
-      select.className = 'form-select';
       Object.entries(attrs).forEach(([key, value]) => select.setAttribute(key, value));
       options.forEach(opt => {
         const option = document.createElement('option');
@@ -101,7 +100,6 @@ class App {
     const renderInput = (type, attrs = {}) => {
       const input = document.createElement('input');
       input.type = type;
-      input.className = 'form-input';
       Object.entries(attrs).forEach(([key, value]) => input.setAttribute(key, value));
       return input;
     };
@@ -118,7 +116,7 @@ class App {
     });
 
     const removeBtn = document.createElement('button');
-    removeBtn.className = 'button ghost';
+    removeBtn.className = 'ghost';
     removeBtn.type = 'button';
     removeBtn.textContent = 'Remover';
     removeBtn.title = 'Remover linha';
@@ -141,10 +139,10 @@ class App {
     // Envolve os elementos para melhor responsividade em mobile
     const wrap = (label, element) => {
       const div = document.createElement('div');
-      const microLabel = document.createElement('span');
-      microLabel.className = 'micro-label';
-      microLabel.textContent = label;
-      div.appendChild(microLabel);
+      const mobileLabel = document.createElement('span');
+      mobileLabel.className = 'mobile-label';
+      mobileLabel.textContent = label;
+      div.appendChild(mobileLabel);
       div.appendChild(element);
       return div;
     };
