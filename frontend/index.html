@@ -1,13 +1,144 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Dispenser de Temperos</title>
+  <link rel="stylesheet" href="style.css" />
   <script src="app.js" defer></script>
 </head>
 <body>
-  <h1>Dispenser de Temperos 🍲</h1>
-  <button onclick="executarReceita()">Executar Receita Teste</button>
-  <div id="resultado"></div>
+  <div class="container">
+    <h1>Dispenser de Temperos</h1>
+
+    <!-- Bloco de teste (JSON) -->
+    <section class="card">
+      <h2>Teste rápido (API JSON)</h2>
+      <p>Cria uma receita de teste via <code>POST /receitas/</code>.</p>
+      <button id="btnTeste" class="btn">Executar Receita Teste</button>
+      <pre id="resultado" class="codebox"></pre>
+    </section>
+
+    <!-- Formulário (até 4 linhas) -->
+    <section class="card">
+      <h2>Montar Receita</h2>
+      <form id="formReceita" action="https://api.yaguts.com.br/receitas/form" method="POST">
+        <label for="nome"><strong>Nome da Receita</strong></label>
+        <input type="text" id="nome" name="nome" placeholder="Ex: Churrasco do Yaguts" required />
+
+        <table class="grid">
+          <thead>
+            <tr>
+              <th>Tempero</th>
+              <th>Reservatório</th>
+              <th>Quantidade (g)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- Linha 1 (obrigatória) -->
+            <tr>
+              <td>
+                <select name="tempero1" required>
+                  <option value="">Selecione...</option>
+                  <option value="pimenta">Pimenta</option>
+                  <option value="sal">Sal</option>
+                  <option value="alho">Alho em pó</option>
+                  <option value="oregano">Orégano</option>
+                  <option value="cominho">Cominho</option>
+                </select>
+              </td>
+              <td>
+                <select name="reservatorio1" required>
+                  <option value="">Selecione...</option>
+                  <option value="1">Reservatório 1</option>
+                  <option value="2">Reservatório 2</option>
+                  <option value="3">Reservatório 3</option>
+                  <option value="4">Reservatório 4</option>
+                </select>
+              </td>
+              <td>
+                <!-- Precisão 1 g -->
+                <input type="number" name="quantidade1" min="1" max="500" step="1" required />
+              </td>
+            </tr>
+
+            <!-- Linha 2 -->
+            <tr>
+              <td>
+                <select name="tempero2">
+                  <option value="">Selecione...</option>
+                  <option value="pimenta">Pimenta</option>
+                  <option value="sal">Sal</option>
+                  <option value="alho">Alho em pó</option>
+                  <option value="oregano">Orégano</option>
+                  <option value="cominho">Cominho</option>
+                </select>
+              </td>
+              <td>
+                <select name="reservatorio2">
+                  <option value="">Selecione...</option>
+                  <option value="1">Reservatório 1</option>
+                  <option value="2">Reservatório 2</option>
+                  <option value="3">Reservatório 3</option>
+                  <option value="4">Reservatório 4</option>
+                </select>
+              </td>
+              <td><input type="number" name="quantidade2" min="1" max="500" step="1" /></td>
+            </tr>
+
+            <!-- Linha 3 -->
+            <tr>
+              <td>
+                <select name="tempero3">
+                  <option value="">Selecione...</option>
+                  <option value="pimenta">Pimenta</option>
+                  <option value="sal">Sal</option>
+                  <option value="alho">Alho em pó</option>
+                  <option value="oregano">Orégano</option>
+                  <option value="cominho">Cominho</option>
+                </select>
+              </td>
+              <td>
+                <select name="reservatorio3">
+                  <option value="">Selecione...</option>
+                  <option value="1">Reservatório 1</option>
+                  <option value="2">Reservatório 2</option>
+                  <option value="3">Reservatório 3</option>
+                  <option value="4">Reservatório 4</option>
+                </select>
+              </td>
+              <td><input type="number" name="quantidade3" min="1" max="500" step="1" /></td>
+            </tr>
+
+            <!-- Linha 4 -->
+            <tr>
+              <td>
+                <select name="tempero4">
+                  <option value="">Selecione...</option>
+                  <option value="pimenta">Pimenta</option>
+                  <option value="sal">Sal</option>
+                  <option value="alho">Alho em pó</option>
+                  <option value="oregano">Orégano</option>
+                  <option value="cominho">Cominho</option>
+                </select>
+              </td>
+              <td>
+                <select name="reservatorio4">
+                  <option value="">Selecione...</option>
+                  <option value="1">Reservatório 1</option>
+                  <option value="2">Reservatório 2</option>
+                  <option value="3">Reservatório 3</option>
+                  <option value="4">Reservatório 4</option>
+                </select>
+              </td>
+              <td><input type="number" name="quantidade4" min="1" max="500" step="1" /></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <button class="btn" type="submit">Enviar Receita</button>
+      </form>
+    </section>
+  </div>
 </body>
 </html>
