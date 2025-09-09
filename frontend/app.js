@@ -31,12 +31,26 @@ function makeSelect(options, attrs = {}) {
   return s;
 }
 
+function makeMicroLabel(text){
+  const span = document.createElement('span');
+  span.className = 'mlabel';
+  span.textContent = text;
+  return span;
+}
+
 function linhaIngrediente(idx) {
   const row = document.createElement('div');
   row.className = 'row';
 
+  // Tempero
+  const wrapT = document.createElement('div');
+  wrapT.appendChild(makeMicroLabel('Tempero'));
   const sTempero = makeSelect(TEMPEROS, { name:`tempero${idx}` });
+  wrapT.appendChild(sTempero);
 
+  // Reservatório
+  const wrapR = document.createElement('div');
+  wrapR.appendChild(makeMicroLabel('Reservatório'));
   const sRes = makeSelect([
     {value:'', label:'—'},
     {value:'1', label:'Reservatório 1'},
@@ -44,13 +58,20 @@ function linhaIngrediente(idx) {
     {value:'3', label:'Reservatório 3'},
     {value:'4', label:'Reservatório 4'}
   ], { name:`reservatorio${idx}`, disabled:'true' });
+  wrapR.appendChild(sRes);
 
+  // Quantidade
+  const wrapQ = document.createElement('div');
+  wrapQ.appendChild(makeMicroLabel('Quantidade (g)'));
   const q = document.createElement('input');
   q.type = 'number'; q.name = `quantidade${idx}`;
   q.min='1'; q.max='500'; q.step='1'; q.disabled = true; q.inputMode = 'numeric';
+  wrapQ.appendChild(q);
 
+  // Remover
   const del = document.createElement('button');
-  del.type='button'; del.className='btn muted'; del.textContent='×'; del.title='Remover';
+  del.type='button'; del.className='btn ghost'; del.textContent='Remover';
+  del.title='Remover linha';
 
   function toggle() {
     const has = !!sTempero.value;
@@ -61,7 +82,10 @@ function linhaIngrediente(idx) {
   sTempero.addEventListener('change', toggle);
   del.addEventListener('click', () => { row.remove(); renumerar(); });
 
-  row.appendChild(sTempero); row.appendChild(sRes); row.appendChild(q); row.appendChild(del);
+  row.appendChild(wrapT);
+  row.appendChild(wrapR);
+  row.appendChild(wrapQ);
+  row.appendChild(del);
   return row;
 }
 
@@ -214,7 +238,7 @@ async function carregarLista(q=''){
       }
       card.appendChild(line);
 
-      const btn = document.createElement('button'); btn.className='btn muted'; btn.textContent='Detalhes';
+      const btn = document.createElement('button'); btn.className='btn ghost'; btn.textContent='Detalhes';
       btn.onclick = ()=> detalharReceita(r.id);
       card.appendChild(btn);
 

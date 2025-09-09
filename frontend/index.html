@@ -3,64 +3,76 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Dispenser de Temperos • MVP</title>
+  <title>Dispenser de Temperos</title>
   <link rel="stylesheet" href="style.css" />
   <script defer src="app.js"></script>
 </head>
 <body>
   <div class="wrap">
-    <header>
+    <header class="topbar">
       <h1>Dispenser de Temperos</h1>
-      <div class="tabs" role="tablist">
+      <p class="subtitle">Monte e salve suas receitas (até 4 ingredientes, precisão de 1&nbsp;g).</p>
+      <nav class="tabs" role="tablist" aria-label="Navegação">
         <button class="tabbtn" id="tab-montar" role="tab" aria-selected="true">Montar Receita</button>
         <button class="tabbtn" id="tab-consultar" role="tab" aria-selected="false">Consultar Receitas</button>
-      </div>
+      </nav>
     </header>
 
     <!-- Montar Receita -->
     <section id="pane-montar" class="card" role="tabpanel" aria-labelledby="tab-montar">
       <form id="formReceita" novalidate>
-        <label for="nome">Nome da Receita</label>
-        <input id="nome" name="nome" type="text" minlength="1" maxlength="120"
-               placeholder="Ex: Churrasco do Yaguts" required />
-        <div class="hint">Até 4 ingredientes. A máquina dosa com precisão de <strong>1 g</strong> (mín 1 g, máx 500 g).</div>
+        <fieldset class="fieldset">
+          <legend>Informações básicas</legend>
+          <label for="nome" class="label">Nome da Receita</label>
+          <input id="nome" name="nome" type="text" minlength="1" maxlength="120"
+                 placeholder="Ex.: Churrasco do Yaguts" required />
+          <p class="hint">Evite repetir <strong>reservatório</strong> na mesma receita. Cada ingrediente deve estar entre <strong>1–500&nbsp;g</strong>.</p>
+        </fieldset>
 
-        <div class="grid-head" aria-hidden="true">
-          <div class="th">Tempero</div>
-          <div class="th">Reservatório</div>
-          <div class="th">Quantidade (g)</div>
-          <div class="th">—</div>
-        </div>
+        <fieldset class="fieldset">
+          <legend>Ingredientes (1–4)</legend>
 
-        <div id="linhas"></div>
+          <!-- Cabeçalho do grid (aparece em telas médias+) -->
+          <div class="grid-head" aria-hidden="true">
+            <div class="th">Tempero</div>
+            <div class="th">Reservatório</div>
+            <div class="th">Quantidade (g)</div>
+            <div class="th"> </div>
+          </div>
 
-        <div class="actions">
-          <button type="button" id="addLinha" class="btn muted">+ Adicionar ingrediente</button>
-          <button type="submit" class="btn primary">Salvar receita</button>
-          <button type="button" id="btnTeste" class="btn secondary">Teste rápido (JSON)</button>
-        </div>
-        <div class="hint">Dica: não repita o <strong>reservatório</strong> na mesma receita e mantenha 1‒500 g por ingrediente.</div>
+          <div id="linhas"></div>
+
+          <div class="actions">
+            <button type="button" id="addLinha" class="btn ghost">+ Adicionar ingrediente</button>
+            <button type="submit" class="btn primary">Salvar receita</button>
+            <button type="button" id="btnTeste" class="btn subtle">Teste rápido (JSON)</button>
+          </div>
+        </fieldset>
+
+        <details class="details">
+          <summary>Ver resposta da API</summary>
+          <pre id="saida" class="codeout" aria-live="polite"></pre>
+        </details>
       </form>
-      <pre id="saida" class="item codeout"></pre>
     </section>
 
     <!-- Consultar Receitas -->
     <section id="pane-consultar" class="card" role="tabpanel" aria-labelledby="tab-consultar" hidden>
-      <div class="actions" style="margin-bottom:10px">
+      <div class="searchbar">
         <input id="busca" type="search" placeholder="Buscar por nome (ex.: Churrasco)" />
         <button id="btnBuscar" class="btn primary" type="button">Buscar</button>
-        <button id="btnRecarregar" class="btn muted" type="button">Recarregar</button>
+        <button id="btnRecarregar" class="btn ghost" type="button">Recarregar</button>
       </div>
-      <div id="lista" class="list"></div>
+      <div id="lista" class="list" aria-live="polite"></div>
       <small class="hint">
-        Obs.: Para esta seção funcionar, o backend deve expor
+        Para esta seção funcionar, o backend deve expor
         <code>GET /receitas/</code> (listar/filtrar) e <code>GET /receitas/{id}</code>.
       </small>
     </section>
   </div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <noscript style="display:block;padding:12px;color:#fff;background:#b91c1c;text-align:center">
+  <noscript class="noscript">
     Este site precisa de JavaScript habilitado para funcionar corretamente.
   </noscript>
 </body>
