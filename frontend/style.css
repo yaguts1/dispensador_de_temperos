@@ -300,3 +300,45 @@ noscript {
   text-align: center;
   margin-top: 12px;
 }
+
+/* ====== Topo alinhado: título + abas ====== */
+.site-header { padding: 12px 0 4px; }
+
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+
+/* as abas vão para a direita em telas largas */
+.header-row .tabs {
+  margin-left: auto;
+}
+
+/* no mobile, empilha e alinha pela esquerda */
+@media (max-width: 640px) {
+  .header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .header-row .tabs {
+    margin-left: 0;         /* alinha com o h1 */
+    width: 100%;            /* ocupa toda a largura */
+  }
+  .header-row .tabs button {
+    flex: 1;                /* botões com a mesma largura */
+  }
+  .tabs { display: flex; }  /* garante flex no mobile também */
+}
+
+/* opcional: dá o mesmo recuo visual do restante do conteúdo */
+.container { padding-inline: 16px; }
+
+/* opcional: deixa o h1 e os botões “assentarem” melhor */
+.site-header h1 {
+  line-height: 1.2;
+  margin: 0;
+}
+.tabs button { margin: 0; }

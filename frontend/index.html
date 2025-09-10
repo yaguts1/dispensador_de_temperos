@@ -8,14 +8,10 @@
   <script defer src="app.js"></script>
 </head>
 <body>
-  <header class="site-header">
-    <div class="container">
+<header class="site-header">
+  <div class="container">
+    <div class="header-row">
       <h1>Dispenser de Temperos</h1>
-      <p class="lead">
-        Monte, salve e consulte receitas. Precisão da máquina:
-        <strong>1 g</strong> (1–500 g por ingrediente, até 4 ingredientes).
-      </p>
-
       <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
         <button id="tab-montar" role="tab" aria-selected="true" aria-controls="pane-montar">
           Montar Receita
@@ -25,7 +21,14 @@
         </button>
       </nav>
     </div>
-  </header>
+
+    <p class="lead">
+      Monte, salve e consulte receitas. Precisão da máquina:
+      <strong>1 g</strong> (1–500 g por ingrediente, até 4 ingredientes).
+    </p>
+  </div>
+</header>
+
 
   <main class="container">
     <!-- PANE: MONTAR -->
