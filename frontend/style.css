@@ -52,7 +52,7 @@ button { font: inherit; }
 }
 .site-header h1 {
   margin: 0 0 4px;
-  font-size: clamp(1.25rem, 2.8vw, 1.75rem);
+  font-size: clamp(1.9rem, 2.8vw, 1.75rem);
   letter-spacing: .2px;
 }
 .lead { color: var(--muted); margin: 6px 0 14px; }
@@ -313,14 +313,14 @@ noscript {
 
 /* as abas vão para a direita em telas largas */
 .header-row .tabs {
-  margin-left: auto;
+  margin-top: 5%;
 }
 
 /* no mobile, empilha e alinha pela esquerda */
 @media (max-width: 640px) {
   .header-row {
     flex-direction: column;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
   }
   .header-row .tabs {
