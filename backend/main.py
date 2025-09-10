@@ -1,14 +1,16 @@
-from fastapi import FastAPI, Depends, HTTPException, Form
+from fastapi import FastAPI, Depends, HTTPException, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 from passlib.hash import bcrypt
-from typing import Optional
+from typing import Optional, List, Iterable
 
 from . import models, schemas, database
 
 app = FastAPI(title="API Dispenser de Temperos")
 
-# CORS (libera front no mesmo domínio/subdomínios)
+# ---------------------------------------------------------------------
+# CORS (libera front no mesmo domínio/subdomínios e dev local)
+# ---------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -17,18 +19,21 @@ app.add_middleware(
         "https://api.yaguts.com.br",
         "http://localhost:5173",
         "http://localhost:3000",
+        "http://localhost:8080",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# cria tabelas no startup (melhor que no import)
+# ---------------------------------------------------------------------
+# Inicialização / dependências
+# ---------------------------------------------------------------------
 @app.on_event("startup")
-def on_startup():
+def on_startup() -> None:
+    """Garante que as tabelas existam ao subir o serviço."""
     models.Base.metadata.create_all(bind=database.engine)
 
-# Dependência de sessão
 def get_db():
     db = database.SessionLocal()
     try:
@@ -40,7 +45,9 @@ def get_db():
 def root():
     return {"message": "API do Dispenser de Temperos está no ar 🚀"}
 
-# ---------- Usuários ----------
+# ---------------------------------------------------------------------
+# Usuários
+# ---------------------------------------------------------------------
 @app.post("/usuarios/", response_model=schemas.Usuario)
 def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     # checa duplicado
@@ -52,8 +59,47 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
     db.refresh(db_usuario)
     return db_usuario
 
-# ---------- Receitas (JSON/Pydantic) ----------
-@app.post("/receitas/", response_model=schemas.Receita)
+# ---------------------------------------------------------------------
+# Utilidades de validação/parse
+# ---------------------------------------------------------------------
+def _to_int_or_none(v: Optional[str]) -> Optional[int]:
+    if v is None or v == "":
+        return None
+    try:
+        return int(v)
+    except Exception:
+        return None
+
+def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> List[schemas.IngredienteBase]:
+    """Valida regras de negócio: 1–4 itens, sem frasco repetido, quantidade 1..500 inteira."""
+    itens = list(ingredientes)
+    if not (1 <= len(itens) <= 4):
+        raise HTTPException(status_code=400, detail="A receita precisa ter de 1 a 4 ingredientes.")
+
+    frascos = set()
+    for ing in itens:
+        # quantidade inteira 1..500
+        try:
+            q = int(ing.quantidade)
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Quantidade inválida para '{ing.tempero}'. Use um inteiro 1–500 g.")
+        if q < 1 or q > 500:
+            raise HTTPException(status_code=400, detail=f"A quantidade de '{ing.tempero}' deve ser um inteiro entre 1 e 500 g.")
+        ing.quantidade = q  # normaliza para int
+
+        # frasco 1..4 e sem repetição
+        if ing.frasco < 1 or ing.frasco > 4:
+            raise HTTPException(status_code=400, detail=f"Reservatório inválido em '{ing.tempero}'. Use valores entre 1 e 4.")
+        if ing.frasco in frascos:
+            raise HTTPException(status_code=400, detail=f"O reservatório {ing.frasco} foi repetido.")
+        frascos.add(ing.frasco)
+
+    return itens
+
+# ---------------------------------------------------------------------
+# Receitas (JSON/Pydantic)
+# ---------------------------------------------------------------------
+@app.post("/receitas/", response_model=schemas.Receita, status_code=201)
 def criar_receita(
     receita: schemas.ReceitaCreate,
     db: Session = Depends(get_db),
@@ -62,47 +108,69 @@ def criar_receita(
     if len(receita.ingredientes) == 0:
         raise HTTPException(status_code=400, detail="A receita precisa de pelo menos 1 ingrediente")
 
+    # valida e normaliza (quantidade int, sem frasco repetido)
+    itens = _valida_ingredientes(receita.ingredientes)
+
     db_receita = models.Receita(nome=receita.nome, dono_id=dono_id)
     db.add(db_receita)
     db.commit()
     db.refresh(db_receita)
 
-    for ing in receita.ingredientes:
+    for ing in itens:
         item = models.IngredienteReceita(
             receita_id=db_receita.id,
-            tempero=ing.tempero,        # <- corrigido
+            tempero=ing.tempero,
             frasco=ing.frasco,
             quantidade=ing.quantidade,
         )
         db.add(item)
 
     db.commit()
+
+    # retorna já com ingredientes carregados
     db.refresh(db_receita)
-    db_receita.ingredientes  # lazy-load
+    db_receita = (
+        db.query(models.Receita)
+        .options(selectinload(models.Receita.ingredientes))
+        .filter(models.Receita.id == db_receita.id)
+        .first()
+    )
     return db_receita
 
+# LISTA: GET /receitas/?limit=&offset=
+@app.get("/receitas/", response_model=List[schemas.Receita])
+def listar_receitas(
+    db: Session = Depends(get_db),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+):
+    query = (
+        db.query(models.Receita)
+        .options(selectinload(models.Receita.ingredientes))
+        .order_by(models.Receita.id.asc())
+        .offset(offset)
+        .limit(limit)
+    )
+    return list(query)
 
-# ---------- Helpers para o formulário ----------
-def _to_int(v: Optional[str]) -> Optional[int]:
-    if v is None or v == "":
-        return None
-    try:
-        return int(v)
-    except Exception:
-        return None
+# DETALHE: GET /receitas/{id}
+@app.get("/receitas/{id}", response_model=schemas.Receita)
+def obter_receita(id: int, db: Session = Depends(get_db)):
+    receita = (
+        db.query(models.Receita)
+        .options(selectinload(models.Receita.ingredientes))
+        .filter(models.Receita.id == id)
+        .first()
+    )
+    if not receita:
+        raise HTTPException(status_code=404, detail="Receita não encontrada.")
+    return receita
 
-def _to_float_01(v: Optional[str]) -> Optional[float]:
-    """Converte para float com precisão de 0.1g; aceita string vazia como None."""
-    if v is None or v == "":
-        return None
-    try:
-        return round(float(v), 1)
-    except Exception:
-        return None
-
-
-# ---------- Receitas (FORMULÁRIO HTML com até 4 linhas) ----------
-@app.post("/receitas/form", response_model=schemas.Receita)
+# ---------------------------------------------------------------------
+# Receitas (FORMULÁRIO HTML com até 4 linhas)
+# Mantém compatibilidade com o fallback do front (/receitas/form)
+# ---------------------------------------------------------------------
+@app.post("/receitas/form", response_model=schemas.Receita, status_code=201)
 def criar_receita_form(
     nome: str = Form(...),
 
@@ -126,7 +194,7 @@ def criar_receita_form(
     db: Session = Depends(get_db),
     dono_id: int = 1,
 ):
-    ingredientes_input = []
+    ingredientes_input: List[schemas.IngredienteBase] = []
 
     for t, r, q in [
         (tempero1, reservatorio1, quantidade1),
@@ -134,21 +202,25 @@ def criar_receita_form(
         (tempero3, reservatorio3, quantidade3),
         (tempero4, reservatorio4, quantidade4),
     ]:
-        r_i = _to_int(r)
-        q_f = _to_float_01(q)
-        if t and r_i is not None and q_f is not None:
+        r_i = _to_int_or_none(r)
+        q_i = _to_int_or_none(q)
+
+        if t and r_i is not None and q_i is not None:
             ingredientes_input.append(
-                schemas.IngredienteBase(tempero=t, frasco=r_i, quantidade=q_f)
+                schemas.IngredienteBase(tempero=t, frasco=r_i, quantidade=q_i)
             )
-        elif (t or r or q) and not (t and r_i is not None and q_f is not None):
+        elif (t or r or q) and not (t and r_i is not None and q_i is not None):
             # Linha parcialmente preenchida -> erro amigável
             raise HTTPException(
                 status_code=400,
-                detail="Preencha todos os campos da linha selecionada (tempero, reservatório e quantidade).",
+                detail="Preencha todos os campos da linha (tempero, reservatório e quantidade).",
             )
 
     if not ingredientes_input:
         raise HTTPException(status_code=400, detail="Informe pelo menos 1 ingrediente completo.")
+
+    # valida regras (1..4 itens, sem frasco repetido, quantidade 1..500 inteiro)
+    ingredientes_input = _valida_ingredientes(ingredientes_input)
 
     receita_in = schemas.ReceitaCreate(nome=nome, ingredientes=ingredientes_input)
     return criar_receita(receita=receita_in, db=db, dono_id=dono_id)

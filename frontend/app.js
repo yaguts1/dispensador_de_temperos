@@ -25,7 +25,6 @@ class App {
       nomeInput: document.getElementById('nome'),
       linhas: document.getElementById('linhas'),
       addBtn: document.getElementById('addLinha'),
-      saida: document.getElementById('saida'),
       tabMontar: document.getElementById('tab-montar'),
       tabConsultar: document.getElementById('tab-consultar'),
       paneMontar: document.getElementById('pane-montar'),
@@ -34,7 +33,6 @@ class App {
       lista: document.getElementById('lista'),
       btnBuscar: document.getElementById('btnBuscar'),
       btnListar: document.getElementById('btnListar'),
-      btnTeste: document.getElementById('btnTeste'),
       toast: document.getElementById('toast'),
     };
     this.init();
@@ -43,24 +41,34 @@ class App {
   init() {
     this.bindEvents();
     this.renderIngredientRow();
+
+    // Aba padrão: CONSULTAR
+    this.selectTab('consultar');
+    // Carregar lista automaticamente
+    this.handleListAll();
   }
 
   bindEvents() {
-    this.els.form.addEventListener('submit', this.handleFormSubmit.bind(this));
-    this.els.nomeInput.addEventListener('keydown', this.handleEnterKey.bind(this));
-    this.els.addBtn.addEventListener('click', this.handleAddRow.bind(this));
+    if (this.els.form) {
+      this.els.form.addEventListener('submit', this.handleFormSubmit.bind(this));
+    }
+    if (this.els.nomeInput) {
+      this.els.nomeInput.addEventListener('keydown', this.handleEnterKey.bind(this));
+    }
+    if (this.els.addBtn) {
+      this.els.addBtn.addEventListener('click', this.handleAddRow.bind(this));
+    }
     this.els.tabMontar.addEventListener('click', () => this.selectTab('montar'));
     this.els.tabConsultar.addEventListener('click', () => this.selectTab('consultar'));
     this.els.btnBuscar.addEventListener('click', this.handleSearchById.bind(this));
     this.els.btnListar.addEventListener('click', this.handleListAll.bind(this));
-    this.els.btnTeste.addEventListener('click', this.handleQuickTest.bind(this));
   }
 
   // ================== Funções de UI ==================
   toast(message, type = '') {
     const t = this.els.toast;
     t.textContent = message;
-    const color = type === 'err' ? 'var(--color-danger)' : (type === 'ok' ? 'var(--color-success)' : 'var(--color-ink)');
+    const color = type === 'err' ? 'var(--danger)' : (type === 'ok' ? 'var(--success)' : 'var(--ink)');
     t.style.backgroundColor = color;
     t.classList.add('show');
     setTimeout(() => t.classList.remove('show'), 2500);
@@ -76,6 +84,7 @@ class App {
 
   // ================== Ingredientes Dinâmicos ==================
   renderIngredientRow() {
+    if (!this.els.linhas) return;
     const rowCount = this.els.linhas.children.length;
     if (rowCount >= 4) {
       this.toast('Máximo de 4 ingredientes.', 'err');
@@ -136,7 +145,7 @@ class App {
       this.renumberRows();
     });
 
-    // Envolve os elementos para melhor responsividade em mobile
+    // Envolve para labels móveis
     const wrap = (label, element) => {
       const div = document.createElement('div');
       const mobileLabel = document.createElement('span');
@@ -156,6 +165,7 @@ class App {
   }
 
   renumberRows() {
+    if (!this.els.linhas) return;
     const rows = [...this.els.linhas.children];
     rows.forEach((row, i) => {
       const n = i + 1;
@@ -238,7 +248,6 @@ class App {
       return;
     }
 
-    this.els.saida.textContent = 'Enviando JSON...';
     try {
       const response = await fetch(`${API_URL}/receitas/`, {
         method: 'POST',
@@ -247,7 +256,6 @@ class App {
       });
 
       const data = await response.json().catch(() => ({}));
-      this.els.saida.textContent = JSON.stringify(data, null, 2);
 
       if (!response.ok) {
         throw new Error(data?.detail || 'Erro ao salvar (JSON)');
@@ -321,12 +329,11 @@ class App {
     try {
       const response = await fetch(`${API_URL}/receitas/`);
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error('Erro ao listar receitas.');
-      }
+      if (!response.ok) throw new Error('Erro ao listar receitas.');
       this.renderRecipeList(data);
     } catch (e) {
-      this.els.lista.innerHTML = `<p class="form-hint">${e.message}</p>`;
+      // Se der erro de rede, ainda sugere criar
+      this.renderRecipeList([]);
       this.toast(e.message, 'err');
     }
   }
@@ -334,8 +341,21 @@ class App {
   renderRecipeList(recipes) {
     const listEl = this.els.lista;
     listEl.innerHTML = '';
+
     if (!Array.isArray(recipes) || recipes.length === 0) {
-      listEl.innerHTML = '<p class="form-hint">Nenhuma receita encontrada.</p>';
+      listEl.innerHTML = `
+        <div class="recipe-item">
+          <h4>Nenhuma receita cadastrada ainda.</h4>
+          <p class="hint">Que tal começar criando sua primeira receita?</p>
+          <button type="button" id="ctaCriar" class="primary" style="width:100%;margin-top:6px;">
+            Criar receita
+          </button>
+        </div>`;
+      const btn = document.getElementById('ctaCriar');
+      if (btn) btn.addEventListener('click', () => {
+        this.selectTab('montar');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
       return;
     }
 
@@ -358,30 +378,6 @@ class App {
       listEl.appendChild(item);
     });
     this.toast('Resultados carregados.', 'ok');
-  }
-
-  async handleQuickTest() {
-    const payload = {
-      nome: 'Receita Teste Rápido',
-      ingredientes: [
-        { tempero: 'pimenta', frasco: 1, quantidade: 2 },
-        { tempero: 'sal', frasco: 2, quantidade: 1 },
-      ],
-    };
-    this.els.saida.textContent = 'Enviando teste...';
-    try {
-      const response = await fetch(`${API_URL}/receitas/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await response.json().catch(() => ({}));
-      this.els.saida.textContent = JSON.stringify(data, null, 2);
-      this.toast(response.ok ? 'Teste OK' : 'Erro no teste', response.ok ? 'ok' : 'err');
-    } catch (e) {
-      this.els.saida.textContent = e.message;
-      this.toast('Erro no teste de API', 'err');
-    }
   }
 }
 
