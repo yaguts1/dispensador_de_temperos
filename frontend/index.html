@@ -1,35 +1,39 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Dispenser de Temperos</title>
   <link rel="stylesheet" href="style.css" />
   <script defer src="app.js"></script>
 </head>
 <body>
+  <header class="site-header">
+    <div class="container">
+      <h1>Dispenser de Temperos</h1>
+      <p class="lead">
+        Monte, salve e consulte receitas. Precisão da máquina:
+        <strong>1 g</strong> (1–500 g por ingrediente, até 4 ingredientes).
+      </p>
 
-  <header>
-    <h1>Dispenser de Temperos</h1>
-    <p>
-      Monte, salve e consulte receitas. Precisão da máquina: <strong>1 g</strong>
-      (1–500 g por ingrediente, até 4 ingredientes).
-    </p>
-    <nav role="tablist" aria-label="Navegação do aplicativo">
-      <button id="tab-montar" role="tab" aria-selected="true" aria-controls="pane-montar">
-        Montar Receita
-      </button>
-      <button id="tab-consultar" role="tab" aria-selected="false" aria-controls="pane-consultar">
-        Consultar Receitas
-      </button>
-    </nav>
+      <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
+        <button id="tab-montar" role="tab" aria-selected="true" aria-controls="pane-montar">
+          Montar Receita
+        </button>
+        <button id="tab-consultar" role="tab" aria-selected="false" aria-controls="pane-consultar">
+          Consultar Receitas
+        </button>
+      </nav>
+    </div>
   </header>
 
-  <main>
+  <main class="container">
+    <!-- PANE: MONTAR -->
     <section id="pane-montar" role="tabpanel" aria-labelledby="tab-montar">
-      <form id="formReceita">
+      <form id="formReceita" class="card">
         <fieldset>
           <legend>Informações básicas</legend>
+
           <label for="nome">Nome da Receita</label>
           <input
             id="nome"
@@ -39,64 +43,70 @@
             maxlength="120"
             placeholder="Ex.: Churrasco do Yaguts"
             required
+            autocomplete="off"
           />
-          <p>
-            Não repita o <strong>reservatório</strong> na mesma receita. Cada ingrediente: <strong>1–500 g</strong>.
+
+          <p class="hint">
+            Não repita o <strong>reservatório</strong> na mesma receita.
+            Cada ingrediente: <strong>1–500 g</strong>.
           </p>
         </fieldset>
 
         <fieldset>
           <legend>Ingredientes (1–4)</legend>
-          <div aria-hidden="true">
+
+          <!-- Cabeçalho em grid (oculto no mobile pelo CSS) -->
+          <div class="grid-header" aria-hidden="true">
             <div>Tempero</div>
             <div>Reservatório</div>
             <div>Quantidade (g)</div>
             <div></div>
           </div>
-          <div id="linhas"></div>
-          <div>
-            <button type="button" id="addLinha">
-              + Adicionar ingrediente
-            </button>
-            <button type="submit" id="btnSalvar">
-              Salvar receita
-            </button>
-            <button type="button" id="btnTeste">
-              Teste rápido
-            </button>
+
+          <!-- Linhas dinâmicas do app.js -->
+          <div id="linhas" class="grid-rows"></div>
+
+          <div class="actions">
+            <button type="button" id="addLinha" class="ghost">+ Adicionar ingrediente</button>
+            <button type="submit" id="btnSalvar" class="primary">Salvar receita</button>
+            <button type="button" id="btnTeste" class="dark">Teste rápido</button>
           </div>
         </fieldset>
 
-        <details>
+        <details class="card subtle">
           <summary>Ver resposta da API</summary>
           <pre id="saida" aria-live="polite"></pre>
         </details>
       </form>
     </section>
 
+    <!-- PANE: CONSULTAR -->
     <section id="pane-consultar" role="tabpanel" aria-labelledby="tab-consultar" hidden>
-      <div>
-        <input
-          id="idBusca"
-          type="number"
-          min="1"
-          placeholder="ID da receita (ex.: 1)"
-          inputmode="numeric"
-        />
-        <button id="btnBuscar" type="button">Buscar</button>
-        <button id="btnListar" type="button">Listar todas</button>
+      <div class="card">
+        <div class="search-bar">
+          <input
+            id="idBusca"
+            type="number"
+            min="1"
+            placeholder="ID da receita (ex.: 1)"
+            inputmode="numeric"
+          />
+          <button id="btnBuscar" type="button" class="primary">Buscar</button>
+          <button id="btnListar" type="button" class="ghost">Listar todas</button>
+        </div>
+
+        <div id="lista" class="recipe-list" aria-live="polite"></div>
+
+        <small class="hint">
+          A listagem depende de o backend expor
+          <code>GET /receitas/</code> e o detalhe <code>GET /receitas/{id}</code>.
+        </small>
       </div>
-      <div id="lista" aria-live="polite"></div>
-      <small>
-        A listagem depende de o backend expor <code>GET /receitas/</code> e o detalhe <code>GET /receitas/{id}</code>.
-      </small>
     </section>
   </main>
 
   <div id="toast" role="status" aria-live="polite"></div>
-  <noscript>
-    Este site precisa de JavaScript habilitado para funcionar corretamente.
-  </noscript>
 
+  <noscript>Este site precisa de JavaScript habilitado para funcionar corretamente.</noscript>
 </body>
 </html>
