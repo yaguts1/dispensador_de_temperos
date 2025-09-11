@@ -17,6 +17,11 @@ const RESERVOIRS = [
   { value: '4', label: 'Reservatório 4' },
 ];
 
+const ICONS = {
+  edit: './Assets/pencil-svgrepo-com.svg',
+  del:  './Assets/delete-svgrepo-com.svg',
+};
+
 // Busca ao digitar
 const AUTOCOMPLETE_MIN_CHARS = 1;
 const TYPING_DEBOUNCE_MS = 200;
@@ -600,14 +605,10 @@ class App {
       item.innerHTML = `
         <div class="card-actions">
           <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-              <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm14.85-9.9c.2-.2.2-.51 0-.71l-2.49-2.49a.5.5 0 0 0-.71 0l-1.83 1.83 3.75 3.75 1.28-1.28z"/>
-            </svg>
+            <img src="${ICONS.edit}" width="18" height="18" alt="" aria-hidden="true">
           </button>
           <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
-            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-              <path fill="currentColor" d="M6 7h12v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7zm3-3h6l1 1h3v2H5V5h3l1-1z"/>
-            </svg>
+            <img src="${ICONS.del}" width="18" height="18" alt="" aria-hidden="true">
           </button>
         </div>
 
@@ -615,6 +616,7 @@ class App {
         <small class="form-hint">ID: ${recipe.id || '—'}</small>
         <ul class="ingredients"></ul>
       `;
+
 
       // Preenche a lista rica de ingredientes
       const ul = item.querySelector('.ingredients');
