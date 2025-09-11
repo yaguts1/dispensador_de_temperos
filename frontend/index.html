@@ -28,24 +28,22 @@
     <!-- PANE: CONSULTAR (padrão visível) -->
     <section id="pane-consultar" role="tabpanel" aria-labelledby="tab-consultar">
       <div class="card">
-        <div class="search-bar">
-          <input
-            id="idBusca"
-            type="number"
-            min="1"
-            placeholder="ID da receita (ex.: 1)"
-            inputmode="numeric"
-          />
-          <button id="btnBuscar" type="button" class="primary">Buscar</button>
-          <button id="btnListar" type="button" class="ghost">Listar todas</button>
-        </div>
+      <div class="search-bar">
+        <input
+          id="q"
+          type="text"
+          placeholder="Busque por nome (ex.: Vinagrete)"
+          autocomplete="off"
+          list="listaSugestoes"
+        />
+        <datalist id="listaSugestoes"></datalist>
+
+        <button id="btnBuscar" type="button" class="primary">Buscar</button>
+        <button id="btnListar" type="button" class="ghost">Listar todas</button>
+      </div>
+
 
         <div id="lista" class="recipe-list" aria-live="polite"></div>
-
-        <small class="hint">
-          A listagem depende de o backend expor
-          <code>GET /receitas/</code> e o detalhe <code>GET /receitas/{id}</code>.
-        </small>
       </div>
 
       <!-- Template de card com botões Editar/Excluir -->

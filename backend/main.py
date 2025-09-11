@@ -5,6 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from passlib.hash import bcrypt
 from typing import Optional, List, Iterable
 from starlette import status
+from sqlalchemy import func
 
 from . import models, schemas, database
 
@@ -144,21 +145,25 @@ def criar_receita(
 
     return _carregar_receita(db, db_receita.id)
 
-# LISTA: GET /receitas/?limit=&offset=
+# LISTA: GET /receitas/?limit=&offset=&q=
 @app.get("/receitas/", response_model=List[schemas.Receita])
 def listar_receitas(
     db: Session = Depends(get_db),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    q: Optional[str] = Query(None, min_length=1),   # <— NOVO
 ):
     query = (
         db.query(models.Receita)
         .options(selectinload(models.Receita.ingredientes))
         .order_by(models.Receita.id.asc())
-        .offset(offset)
-        .limit(limit)
     )
+    if q:
+        qn = q.strip().lower()
+        query = query.filter(func.lower(models.Receita.nome).contains(qn))
+    query = query.offset(offset).limit(limit)
     return list(query)
+
 
 # DETALHE: GET /receitas/{id}
 @app.get("/receitas/{id}", response_model=schemas.Receita)
@@ -167,6 +172,25 @@ def obter_receita(id: int, db: Session = Depends(get_db)):
     if not receita:
         raise HTTPException(status_code=404, detail="Receita não encontrada.")
     return receita
+
+# SUGESTÕES: GET /receitas/sugestoes?q=vin&limit=8
+@app.get("/receitas/sugestoes", response_model=List[schemas.SugestaoReceita])
+def sugerir_receitas(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(8, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    qn = q.strip().lower()
+    if not qn:
+        return []
+    rows = (
+        db.query(models.Receita.id, models.Receita.nome)
+        .filter(func.lower(models.Receita.nome).contains(qn))
+        .order_by(models.Receita.nome.asc())
+        .limit(limit)
+        .all()
+    )
+    return [{"id": r[0], "nome": r[1]} for r in rows]
 
 # ATUALIZAR: PUT /receitas/{id}
 @app.put("/receitas/{id}", response_model=schemas.Receita)

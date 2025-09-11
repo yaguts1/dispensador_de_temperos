@@ -57,3 +57,8 @@ class UsuarioCreate(UsuarioBase):
 class Usuario(UsuarioBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
+    
+class SugestaoReceita(BaseModel):
+    id: int
+    nome: str
+    model_config = ConfigDict(from_attributes=True)

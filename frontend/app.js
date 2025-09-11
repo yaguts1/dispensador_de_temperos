@@ -43,8 +43,9 @@ class App {
       editNome: document.getElementById('editNome'),
       editId: document.getElementById('editId'),
 
-      // consulta
-      idBusca: document.getElementById('idBusca'),
+      // consulta (novo: por nome com autocomplete)
+      buscaNome: document.getElementById('q'),
+      listaSugestoes: document.getElementById('listaSugestoes'),
       btnBuscar: document.getElementById('btnBuscar'),
       btnListar: document.getElementById('btnListar'),
       lista: document.getElementById('lista'),
@@ -54,6 +55,9 @@ class App {
       dlgExcluir: document.getElementById('dlgExcluir'),
       toast: document.getElementById('toast'),
     };
+
+    // timer para debounce das sugestões
+    this._sugestTimer = null;
 
     this.init();
   }
@@ -91,8 +95,18 @@ class App {
       if (ok) this.excluirReceita(id);
     });
 
-    // Consulta
-    this.els.btnBuscar.addEventListener('click', () => this.handleSearchById());
+    // Consulta (novo fluxo por nome + autocomplete)
+    if (this.els.buscaNome) {
+      this.els.buscaNome.addEventListener('input', () => this.handleSuggestDebounced());
+      this.els.buscaNome.addEventListener('change', () => this.handleSearchByText());
+      this.els.buscaNome.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.handleSearchByText();
+        }
+      });
+    }
+    this.els.btnBuscar.addEventListener('click', () => this.handleSearchByText());
     this.els.btnListar.addEventListener('click', () => this.handleListAll());
 
     // Delegação: cliques em Editar/Excluir dentro da lista
@@ -432,23 +446,59 @@ class App {
     return input;
   }
 
-  // ================== Consulta ==================
-  async handleSearchById() {
-    const id = Number(this.els.idBusca.value);
-    if (!Number.isInteger(id) || id <= 0) {
-      this.toast('ID inválido. Use um número inteiro maior que zero.', 'err');
-      return;
-    }
-    this.els.lista.innerHTML = '<p class="form-hint">Carregando...</p>';
+  // ================== Consulta / Autocomplete ==================
+  handleSuggestDebounced() {
+    clearTimeout(this._sugestTimer);
+    this._sugestTimer = setTimeout(() => this.handleSuggest(), 150);
+  }
+
+  async handleSuggest() {
+    const q = this.els.buscaNome?.value.trim() ?? '';
+    if (!q) { if (this.els.listaSugestoes) this.els.listaSugestoes.innerHTML = ''; return; }
 
     try {
-      const response = await fetch(`${API_URL}/receitas/${id}`);
+      const resp = await fetch(`${API_URL}/receitas/sugestoes?q=${encodeURIComponent(q)}`);
+      const data = await resp.json();
+      if (!this.els.listaSugestoes) return;
+      this.els.listaSugestoes.innerHTML = data
+        .map(s => `<option value="${s.nome} — #${s.id}"></option>`)
+        .join('');
+    } catch {
+      // silencioso: sem interrupção de UX
+    }
+  }
+
+  async handleSearchByText() {
+    const txt = this.els.buscaNome?.value.trim() ?? '';
+    if (!txt) { this.handleListAll(); return; }
+
+    // se terminar com "#ID", busca direta por id
+    const m = txt.match(/#(\d+)\s*$/);
+    if (m) {
+      const id = Number(m[1]);
+      if (Number.isInteger(id) && id > 0) {
+        try {
+          const response = await fetch(`${API_URL}/receitas/${id}`);
+          const data = await response.json();
+          if (!response.ok) throw new Error(data?.detail || 'Receita não encontrada.');
+          this.renderRecipeList([data]);
+        } catch (e) {
+          this.renderRecipeList([]);
+          this.toast(e.message || 'Erro ao buscar', 'err');
+        }
+        return;
+      }
+    }
+
+    // caso contrário, filtra por nome
+    try {
+      const response = await fetch(`${API_URL}/receitas/?q=${encodeURIComponent(txt)}&limit=100`);
       const data = await response.json();
-      if (!response.ok) throw new Error(data?.detail || 'Receita não encontrada.');
-      this.renderRecipeList([data]);
+      if (!response.ok) throw new Error('Erro na busca.');
+      this.renderRecipeList(data);
     } catch (e) {
-      this.els.lista.innerHTML = ''; // não gruda erro no DOM
-      this.toast(e.message || 'Erro ao buscar', 'err');
+      this.renderRecipeList([]); // mostra CTA de criar
+      this.toast(e.message || 'Erro na busca', 'err');
     }
   }
 
