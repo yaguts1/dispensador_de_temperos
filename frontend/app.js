@@ -17,61 +17,116 @@ const RESERVOIRS = [
   { value: '4', label: 'Reservatório 4' },
 ];
 
-// ================== Componentes da Aplicação ==================
+// ================== App ==================
 class App {
   constructor() {
+    this.state = { isEditing: false, editId: null };
+
     this.els = {
-      form: document.getElementById('formReceita'),
-      nomeInput: document.getElementById('nome'),
-      linhas: document.getElementById('linhas'),
-      addBtn: document.getElementById('addLinha'),
+      // abas e panes
       tabMontar: document.getElementById('tab-montar'),
       tabConsultar: document.getElementById('tab-consultar'),
       paneMontar: document.getElementById('pane-montar'),
       paneConsultar: document.getElementById('pane-consultar'),
+
+      // formulário
+      form: document.getElementById('formReceita'),
+      nomeInput: document.getElementById('nome'),
+      linhas: document.getElementById('linhas'),
+      addBtn: document.getElementById('addLinha'),
+      btnSalvar: document.getElementById('btnSalvar'),
+      btnAtualizar: document.getElementById('btnAtualizar'),
+      btnCancelarEdicao: document.getElementById('btnCancelarEdicao'),
+      btnExcluirAtual: document.getElementById('btnExcluirAtual'),
+      receitaIdInput: document.getElementById('receitaId'),
+      editInfo: document.getElementById('editInfo'),
+      editNome: document.getElementById('editNome'),
+      editId: document.getElementById('editId'),
+
+      // consulta
       idBusca: document.getElementById('idBusca'),
-      lista: document.getElementById('lista'),
       btnBuscar: document.getElementById('btnBuscar'),
       btnListar: document.getElementById('btnListar'),
+      lista: document.getElementById('lista'),
+      tplCard: document.getElementById('tpl-receita'),
+
+      // ui
+      dlgExcluir: document.getElementById('dlgExcluir'),
       toast: document.getElementById('toast'),
     };
+
     this.init();
   }
 
   init() {
     this.bindEvents();
-    this.renderIngredientRow();
-
-    // Aba padrão: CONSULTAR
+    this.renderIngredientRow(); // primeira linha vazia
     this.selectTab('consultar');
-    // Carregar lista automaticamente
     this.handleListAll();
   }
 
   bindEvents() {
-    if (this.els.form) {
-      this.els.form.addEventListener('submit', this.handleFormSubmit.bind(this));
-    }
-    if (this.els.nomeInput) {
-      this.els.nomeInput.addEventListener('keydown', this.handleEnterKey.bind(this));
-    }
-    if (this.els.addBtn) {
-      this.els.addBtn.addEventListener('click', this.handleAddRow.bind(this));
-    }
+    // Tabs
     this.els.tabMontar.addEventListener('click', () => this.selectTab('montar'));
     this.els.tabConsultar.addEventListener('click', () => this.selectTab('consultar'));
-    this.els.btnBuscar.addEventListener('click', this.handleSearchById.bind(this));
-    this.els.btnListar.addEventListener('click', this.handleListAll.bind(this));
+
+    // Form
+    if (this.els.form) {
+      this.els.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (this.state.isEditing) this.atualizarReceita();
+        else this.salvarReceita();
+      });
+    }
+    this.els.nomeInput.addEventListener('keydown', (e) => this.handleEnterKey(e));
+    this.els.addBtn.addEventListener('click', () => this.handleAddRow());
+
+    // Botões de edição no formulário
+    this.els.btnAtualizar.addEventListener('click', () => this.atualizarReceita());
+    this.els.btnCancelarEdicao.addEventListener('click', () => this.setModeCreate());
+    this.els.btnExcluirAtual.addEventListener('click', async () => {
+      const id = this.state.editId;
+      if (!id) return;
+      const ok = await this.confirmDelete();
+      if (ok) this.excluirReceita(id);
+    });
+
+    // Consulta
+    this.els.btnBuscar.addEventListener('click', () => this.handleSearchById());
+    this.els.btnListar.addEventListener('click', () => this.handleListAll());
+
+    // Delegação: cliques em Editar/Excluir dentro da lista
+    this.els.lista.addEventListener('click', async (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const card = btn.closest('.recipe-item');
+      const id = Number(card?.dataset?.id);
+      if (!id) return;
+
+      if (btn.dataset.action === 'editar') this.loadRecipeIntoForm(id);
+      if (btn.dataset.action === 'excluir') {
+        const ok = await this.confirmDelete();
+        if (ok) this.excluirReceita(id);
+      }
+    });
   }
 
-  // ================== Funções de UI ==================
+  // ================== UI helpers ==================
   toast(message, type = '') {
     const t = this.els.toast;
-    t.textContent = message;
-    const color = type === 'err' ? 'var(--danger)' : (type === 'ok' ? 'var(--success)' : 'var(--ink)');
+    if (!t) return;
+
+    const color = type === 'err' ? '#ef4444' : (type === 'ok' ? '#22c55e' : 'var(--ink)');
     t.style.backgroundColor = color;
+
+    // reinicia animação
+    t.classList.remove('show');
+    void t.offsetHeight;
+    t.textContent = message;
     t.classList.add('show');
-    setTimeout(() => t.classList.remove('show'), 2500);
+
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
   }
 
   selectTab(which) {
@@ -82,9 +137,53 @@ class App {
     this.els.paneConsultar.hidden = isMontar;
   }
 
+  setModeCreate() {
+    this.state.isEditing = false;
+    this.state.editId = null;
+
+    this.els.receitaIdInput.value = '';
+    this.els.editInfo.hidden = true;
+    this.els.btnSalvar.hidden = false;
+    this.els.btnAtualizar.hidden = true;
+    this.els.btnCancelarEdicao.hidden = true;
+    this.els.btnExcluirAtual.hidden = true;
+
+    this.els.form.reset();
+    this.els.linhas.innerHTML = '';
+    this.renderIngredientRow();
+  }
+
+  setModeEdit(recipe) {
+    this.state.isEditing = true;
+    this.state.editId = recipe.id;
+
+    this.els.receitaIdInput.value = String(recipe.id);
+    this.els.editNome.textContent = recipe.nome || '—';
+    this.els.editId.textContent = String(recipe.id);
+    this.els.editInfo.hidden = false;
+    this.els.btnSalvar.hidden = true;
+    this.els.btnAtualizar.hidden = false;
+    this.els.btnCancelarEdicao.hidden = false;
+    this.els.btnExcluirAtual.hidden = false;
+  }
+
+  async confirmDelete() {
+    const dlg = this.els.dlgExcluir;
+    if (dlg && typeof dlg.showModal === 'function') {
+      return new Promise((resolve) => {
+        const onClose = () => {
+          dlg.removeEventListener('close', onClose);
+          resolve(dlg.returnValue === 'confirm');
+        };
+        dlg.addEventListener('close', onClose, { once: true });
+        dlg.showModal();
+      });
+    }
+    return window.confirm('Tem certeza que deseja excluir esta receita?');
+  }
+
   // ================== Ingredientes Dinâmicos ==================
   renderIngredientRow() {
-    if (!this.els.linhas) return;
     const rowCount = this.els.linhas.children.length;
     if (rowCount >= 4) {
       this.toast('Máximo de 4 ingredientes.', 'err');
@@ -145,7 +244,6 @@ class App {
       this.renumberRows();
     });
 
-    // Envolve para labels móveis
     const wrap = (label, element) => {
       const div = document.createElement('div');
       const mobileLabel = document.createElement('span');
@@ -165,7 +263,6 @@ class App {
   }
 
   renumberRows() {
-    if (!this.els.linhas) return;
     const rows = [...this.els.linhas.children];
     rows.forEach((row, i) => {
       const n = i + 1;
@@ -175,21 +272,14 @@ class App {
     });
   }
 
-  handleAddRow() {
-    this.renderIngredientRow();
-  }
+  handleAddRow() { this.renderIngredientRow(); }
 
-  // ================== Lógica do Formulário ==================
+  // ================== Serialização / Validação ==================
   handleEnterKey(e) {
     if (e.key === 'Enter') {
       e.preventDefault();
       this.els.form.requestSubmit();
     }
-  }
-
-  handleFormSubmit(e) {
-    e.preventDefault();
-    this.salvarReceita();
   }
 
   validateForm() {
@@ -226,11 +316,7 @@ class App {
         throw new Error(`A quantidade de ${tempero} deve ser um número inteiro entre 1 e 500.`);
       }
 
-      ingredientes.push({
-        tempero: tempero,
-        frasco: numReservatorio,
-        quantidade: numQuantidade,
-      });
+      ingredientes.push({ tempero, frasco: numReservatorio, quantidade: numQuantidade });
     }
 
     if (ingredientes.length === 0) {
@@ -239,14 +325,11 @@ class App {
     return { nome, ingredientes };
   }
 
+  // ================== CRUD ==================
   async salvarReceita() {
     let payload;
-    try {
-      payload = this.validateForm();
-    } catch (e) {
-      this.toast(e.message, 'err');
-      return;
-    }
+    try { payload = this.validateForm(); }
+    catch (e) { this.toast(e.message, 'err'); return; }
 
     try {
       const response = await fetch(`${API_URL}/receitas/`, {
@@ -254,44 +337,91 @@ class App {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-
       const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        throw new Error(data?.detail || 'Erro ao salvar (JSON)');
-      }
+      if (!response.ok) throw new Error(data?.detail || 'Erro ao salvar (JSON)');
 
       this.toast('Receita salva com sucesso!', 'ok');
-      this.els.form.reset();
-      this.els.linhas.innerHTML = '';
-      this.renderIngredientRow();
-
+      this.setModeCreate();
+      this.selectTab('consultar');
+      this.handleListAll();
     } catch (e) {
       this.toast(e.message, 'err');
-      // Fallback
-      this.fallbackFormSubmit(payload);
+      this.fallbackFormSubmit(payload); // apenas criação
     }
   }
 
+  async atualizarReceita() {
+    if (!this.state.isEditing || !this.state.editId) return;
+
+    let payload;
+    try { payload = this.validateForm(); }
+    catch (e) { this.toast(e.message, 'err'); return; }
+
+    try {
+      const response = await fetch(`${API_URL}/receitas/${this.state.editId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
+
+      this.toast('Receita atualizada!', 'ok');
+      this.setModeCreate();
+      this.selectTab('consultar');
+      this.handleListAll();
+    } catch (e) {
+      this.toast(e.message, 'err');
+    }
+  }
+
+  async excluirReceita(id) {
+    try {
+      const response = await fetch(`${API_URL}/receitas/${id}`, { method: 'DELETE' });
+      if (!response.ok) {
+        let msg = `Erro ao excluir (HTTP ${response.status})`;
+        try {
+          const data = await response.json();
+          if (data?.detail) msg = `Erro ao excluir: ${data.detail}`;
+        } catch {}
+        throw new Error(msg);
+      }
+      this.toast('Receita excluída.', 'ok');
+
+      if (this.state.isEditing && this.state.editId === id) {
+        this.setModeCreate();
+        this.selectTab('consultar');
+      }
+      this.handleListAll();
+    } catch (e) {
+      this.toast(e.message, 'err');
+    }
+  }
+
+  // Fallback de formulário (somente criação)
   fallbackFormSubmit(payload) {
-    this.toast('Tentando fallback /receitas/form...', '');
-    const tempForm = document.createElement('form');
-    tempForm.action = `${API_URL}/receitas/form`;
-    tempForm.method = 'POST';
-    tempForm.target = '_blank';
-    tempForm.style.display = 'none';
+    try {
+      const tempForm = document.createElement('form');
+      tempForm.action = `${API_URL}/receitas/form`;
+      tempForm.method = 'POST';
+      tempForm.target = '_blank';
+      tempForm.style.display = 'none';
 
-    tempForm.appendChild(this.createHiddenInput('nome', payload.nome));
-    payload.ingredientes.forEach((it, i) => {
-      const n = i + 1;
-      tempForm.appendChild(this.createHiddenInput(`tempero${n}`, it.tempero));
-      tempForm.appendChild(this.createHiddenInput(`reservatorio${n}`, String(it.frasco)));
-      tempForm.appendChild(this.createHiddenInput(`quantidade${n}`, String(it.quantidade)));
-    });
+      tempForm.appendChild(this.createHiddenInput('nome', payload.nome));
+      payload.ingredientes.forEach((it, i) => {
+        const n = i + 1;
+        tempForm.appendChild(this.createHiddenInput(`tempero${n}`, it.tempero));
+        tempForm.appendChild(this.createHiddenInput(`reservatorio${n}`, String(it.frasco)));
+        tempForm.appendChild(this.createHiddenInput(`quantidade${n}`, String(it.quantidade)));
+      });
 
-    document.body.appendChild(tempForm);
-    tempForm.submit();
-    tempForm.remove();
+      document.body.appendChild(tempForm);
+      tempForm.submit();
+      tempForm.remove();
+      this.toast('Enviado via fallback.', 'ok');
+    } catch {
+      this.toast('Não foi possível usar o fallback.', 'err');
+    }
   }
 
   createHiddenInput(name, value) {
@@ -302,7 +432,7 @@ class App {
     return input;
   }
 
-  // ================== Ações de Consulta ==================
+  // ================== Consulta ==================
   async handleSearchById() {
     const id = Number(this.els.idBusca.value);
     if (!Number.isInteger(id) || id <= 0) {
@@ -314,13 +444,11 @@ class App {
     try {
       const response = await fetch(`${API_URL}/receitas/${id}`);
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.detail || 'Receita não encontrada.');
-      }
+      if (!response.ok) throw new Error(data?.detail || 'Receita não encontrada.');
       this.renderRecipeList([data]);
     } catch (e) {
-      this.els.lista.innerHTML = `<p class="form-hint">${e.message}</p>`;
-      this.toast(e.message, 'err');
+      this.els.lista.innerHTML = ''; // não gruda erro no DOM
+      this.toast(e.message || 'Erro ao buscar', 'err');
     }
   }
 
@@ -332,9 +460,8 @@ class App {
       if (!response.ok) throw new Error('Erro ao listar receitas.');
       this.renderRecipeList(data);
     } catch (e) {
-      // Se der erro de rede, ainda sugere criar
-      this.renderRecipeList([]);
-      this.toast(e.message, 'err');
+      this.renderRecipeList([]); // mostra CTA de criar
+      this.toast(e.message || 'Falha ao listar', 'err');
     }
   }
 
@@ -347,12 +474,13 @@ class App {
         <div class="recipe-item">
           <h4>Nenhuma receita cadastrada ainda.</h4>
           <p class="hint">Que tal começar criando sua primeira receita?</p>
-          <button type="button" id="ctaCriar" class="primary" style="width:100%;margin-top:6px;">
-            Criar receita
-          </button>
+          <div class="actions" style="grid-template-columns:1fr">
+            <button type="button" id="ctaCriar" class="primary">Criar receita</button>
+          </div>
         </div>`;
       const btn = document.getElementById('ctaCriar');
       if (btn) btn.addEventListener('click', () => {
+        this.setModeCreate();
         this.selectTab('montar');
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
@@ -360,28 +488,83 @@ class App {
     }
 
     recipes.forEach(recipe => {
-      const item = document.createElement('div');
-      item.className = 'recipe-item';
-      item.innerHTML = `<h4>${recipe.nome || 'Receita sem nome'}</h4>
-                        <small class="form-hint">ID: ${recipe.id || '—'}</small>`;
+      const tpl = this.els.tplCard?.content?.firstElementChild;
+      let item;
+      if (tpl) {
+        item = tpl.cloneNode(true);
+        item.querySelector('[data-el="nome"]').textContent = recipe.nome || 'Receita sem nome';
+        item.querySelector('[data-el="id"]').textContent = recipe.id ?? '—';
+        const tags = item.querySelector('[data-el="tags"]');
+        (recipe.ingredientes || []).forEach(ing => {
+          const tag = document.createElement('span');
+          tag.className = 'recipe-tag';
+          tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
+          tags.appendChild(tag);
+        });
+      } else {
+        item = document.createElement('div');
+        item.className = 'recipe-item';
+        item.innerHTML = `<h4>${recipe.nome || 'Receita sem nome'}</h4>
+                          <small class="form-hint">ID: ${recipe.id || '—'}</small>`;
+        const tagsContainer = document.createElement('div');
+        tagsContainer.className = 'recipe-tags';
+        (recipe.ingredientes || []).forEach(ing => {
+          const tag = document.createElement('span');
+          tag.className = 'recipe-tag';
+          tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
+          tagsContainer.appendChild(tag);
+        });
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+        actions.style.gridTemplateColumns = '1fr 1fr';
+        actions.style.marginTop = '10px';
+        actions.innerHTML = `
+          <button type="button" class="ghost" data-action="editar">Editar</button>
+          <button type="button" class="dark" data-action="excluir">Excluir</button>`;
+        item.appendChild(tagsContainer);
+        item.appendChild(actions);
+      }
 
-      const tagsContainer = document.createElement('div');
-      tagsContainer.className = 'recipe-tags';
-
-      (recipe.ingredientes || []).forEach(ing => {
-        const tag = document.createElement('span');
-        tag.className = 'recipe-tag';
-        tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
-        tagsContainer.appendChild(tag);
-      });
-      item.appendChild(tagsContainer);
+      item.dataset.id = String(recipe.id);
       listEl.appendChild(item);
     });
+
     this.toast('Resultados carregados.', 'ok');
+  }
+
+  // ================== Carregar no formulário (Editar) ==================
+  async loadRecipeIntoForm(id) {
+    try {
+      const response = await fetch(`${API_URL}/receitas/${id}`);
+      const recipe = await response.json();
+      if (!response.ok) throw new Error(recipe?.detail || 'Receita não encontrada.');
+
+      this.els.form.reset();
+      this.els.nomeInput.value = recipe.nome || '';
+
+      this.els.linhas.innerHTML = '';
+      const itens = Array.isArray(recipe.ingredientes) ? recipe.ingredientes : [];
+      if (itens.length === 0) this.renderIngredientRow();
+      itens.forEach((ing, idx) => {
+        this.renderIngredientRow();
+        const row = this.els.linhas.children[idx];
+        const temperoSelect = row.querySelector('select[name^="tempero"]');
+        const reservatorioSelect = row.querySelector('select[name^="reservatorio"]');
+        const quantidadeInput = row.querySelector('input[name^="quantidade"]');
+
+        temperoSelect.value = ing.tempero || '';
+        temperoSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        reservatorioSelect.value = String(ing.frasco ?? '');
+        quantidadeInput.value = String(ing.quantidade ?? '');
+      });
+
+      this.setModeEdit(recipe);
+      this.selectTab('montar');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (e) {
+      this.toast(String(e.message || e), 'err');
+    }
   }
 }
 
-// Inicia a aplicação após o DOM estar totalmente carregado
-document.addEventListener('DOMContentLoaded', () => {
-  new App();
-});
+document.addEventListener('DOMContentLoaded', () => { new App(); });

@@ -47,11 +47,31 @@
           <code>GET /receitas/</code> e o detalhe <code>GET /receitas/{id}</code>.
         </small>
       </div>
+
+      <!-- Template de card com botões Editar/Excluir -->
+      <template id="tpl-receita">
+        <div class="recipe-item">
+          <h4 data-el="nome">Nome da Receita</h4>
+          <small class="form-hint">ID: <span data-el="id">—</span></small>
+          <div class="recipe-tags" data-el="tags"></div>
+          <div class="actions" style="margin-top:10px">
+            <button type="button" class="ghost" data-action="editar">Editar</button>
+            <button type="button" class="dark" data-action="excluir">Excluir</button>
+          </div>
+        </div>
+      </template>
     </section>
 
     <!-- PANE: MONTAR (inicialmente oculto) -->
     <section id="pane-montar" role="tabpanel" aria-labelledby="tab-montar" hidden>
       <form id="formReceita" class="card">
+        <input type="hidden" id="receitaId" name="receitaId" value="" />
+
+        <div id="editInfo" class="card subtle" hidden>
+          <strong>Editando:</strong> <span id="editNome">—</span>
+          <small class="hint">ID: <span id="editId">—</span></small>
+        </div>
+
         <fieldset>
           <legend>Informações básicas</legend>
 
@@ -76,7 +96,6 @@
         <fieldset>
           <legend>Ingredientes (1–4)</legend>
 
-          <!-- Cabeçalho em grid (oculto no mobile pelo CSS) -->
           <div class="grid-header" aria-hidden="true">
             <div>Tempero</div>
             <div>Reservatório</div>
@@ -84,17 +103,31 @@
             <div></div>
           </div>
 
-          <!-- Linhas dinâmicas do app.js -->
           <div id="linhas" class="grid-rows"></div>
 
           <div class="actions">
             <button type="button" id="addLinha" class="ghost">+ Adicionar ingrediente</button>
+
             <button type="submit" id="btnSalvar" class="primary">Salvar receita</button>
+            <button type="button" id="btnAtualizar" class="primary" hidden>Atualizar receita</button>
+            <button type="button" id="btnCancelarEdicao" class="ghost" hidden>Cancelar edição</button>
+            <button type="button" id="btnExcluirAtual" class="dark" hidden>Excluir receita</button>
           </div>
         </fieldset>
       </form>
     </section>
   </main>
+
+  <dialog id="dlgExcluir">
+    <form method="dialog" style="min-width: 280px">
+      <p><strong>Excluir receita?</strong></p>
+      <p class="hint">Esta ação não pode ser desfeita.</p>
+      <div class="actions">
+        <button value="cancel" class="ghost" type="submit">Cancelar</button>
+        <button value="confirm" class="dark" type="submit">Excluir</button>
+      </div>
+    </form>
+  </dialog>
 
   <div id="toast" role="status" aria-live="polite"></div>
   <noscript>Este site precisa de JavaScript habilitado para funcionar corretamente.</noscript>

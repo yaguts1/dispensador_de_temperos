@@ -1,8 +1,10 @@
-from fastapi import FastAPI, Depends, HTTPException, Form, Query
+from fastapi import FastAPI, Depends, HTTPException, Form, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.exc import IntegrityError
 from passlib.hash import bcrypt
 from typing import Optional, List, Iterable
+from starlette import status
 
 from . import models, schemas, database
 
@@ -71,7 +73,7 @@ def _to_int_or_none(v: Optional[str]) -> Optional[int]:
         return None
 
 def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> List[schemas.IngredienteBase]:
-    """Valida regras de negócio: 1–4 itens, sem frasco repetido, quantidade 1..500 inteira."""
+    """Valida regras de negócio: 1–4 itens, sem frasco repetido, quantidade 1..500 (inteira), frasco 1..4."""
     itens = list(ingredientes)
     if not (1 <= len(itens) <= 4):
         raise HTTPException(status_code=400, detail="A receita precisa ter de 1 a 4 ingredientes.")
@@ -96,10 +98,19 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
 
     return itens
 
+def _carregar_receita(db: Session, id: int) -> models.Receita:
+    r = (
+        db.query(models.Receita)
+        .options(selectinload(models.Receita.ingredientes))
+        .filter(models.Receita.id == id)
+        .first()
+    )
+    return r
+
 # ---------------------------------------------------------------------
 # Receitas (JSON/Pydantic)
 # ---------------------------------------------------------------------
-@app.post("/receitas/", response_model=schemas.Receita, status_code=201)
+@app.post("/receitas/", response_model=schemas.Receita, status_code=status.HTTP_201_CREATED)
 def criar_receita(
     receita: schemas.ReceitaCreate,
     db: Session = Depends(get_db),
@@ -117,25 +128,21 @@ def criar_receita(
     db.refresh(db_receita)
 
     for ing in itens:
-        item = models.IngredienteReceita(
+        db.add(models.IngredienteReceita(
             receita_id=db_receita.id,
             tempero=ing.tempero,
             frasco=ing.frasco,
             quantidade=ing.quantidade,
-        )
-        db.add(item)
+        ))
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        # proteção extra caso o UniqueConstraint seja violado por concorrência
+        raise HTTPException(status_code=400, detail="Não é permitido repetir o mesmo reservatório na receita.")
 
-    # retorna já com ingredientes carregados
-    db.refresh(db_receita)
-    db_receita = (
-        db.query(models.Receita)
-        .options(selectinload(models.Receita.ingredientes))
-        .filter(models.Receita.id == db_receita.id)
-        .first()
-    )
-    return db_receita
+    return _carregar_receita(db, db_receita.id)
 
 # LISTA: GET /receitas/?limit=&offset=
 @app.get("/receitas/", response_model=List[schemas.Receita])
@@ -156,21 +163,63 @@ def listar_receitas(
 # DETALHE: GET /receitas/{id}
 @app.get("/receitas/{id}", response_model=schemas.Receita)
 def obter_receita(id: int, db: Session = Depends(get_db)):
-    receita = (
-        db.query(models.Receita)
-        .options(selectinload(models.Receita.ingredientes))
-        .filter(models.Receita.id == id)
-        .first()
-    )
+    receita = _carregar_receita(db, id)
     if not receita:
         raise HTTPException(status_code=404, detail="Receita não encontrada.")
     return receita
+
+# ATUALIZAR: PUT /receitas/{id}
+@app.put("/receitas/{id}", response_model=schemas.Receita)
+def atualizar_receita(
+    id: int,
+    receita: schemas.ReceitaCreate,  # mesmo shape do POST
+    db: Session = Depends(get_db),
+):
+    db_receita = db.query(models.Receita).filter(models.Receita.id == id).first()
+    if not db_receita:
+        raise HTTPException(status_code=404, detail="Receita não encontrada.")
+
+    itens = _valida_ingredientes(receita.ingredientes)
+
+    # atualiza nome
+    db_receita.nome = receita.nome
+
+    # remove ingredientes anteriores e recria (mais simples e confiável)
+    db.query(models.IngredienteReceita).filter(
+        models.IngredienteReceita.receita_id == id
+    ).delete(synchronize_session=False)
+
+    for ing in itens:
+        db.add(models.IngredienteReceita(
+            receita_id=id,
+            tempero=ing.tempero,
+            frasco=ing.frasco,
+            quantidade=ing.quantidade,
+        ))
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Não é permitido repetir o mesmo reservatório na receita.")
+
+    return _carregar_receita(db, id)
+
+# EXCLUIR: DELETE /receitas/{id}
+@app.delete("/receitas/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def excluir_receita(id: int, db: Session = Depends(get_db)):
+    receita = db.query(models.Receita).filter(models.Receita.id == id).first()
+    if not receita:
+        raise HTTPException(status_code=404, detail="Receita não encontrada.")
+    db.delete(receita)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 # ---------------------------------------------------------------------
 # Receitas (FORMULÁRIO HTML com até 4 linhas)
 # Mantém compatibilidade com o fallback do front (/receitas/form)
 # ---------------------------------------------------------------------
-@app.post("/receitas/form", response_model=schemas.Receita, status_code=201)
+@app.post("/receitas/form", response_model=schemas.Receita, status_code=status.HTTP_201_CREATED)
 def criar_receita_form(
     nome: str = Form(...),
 
