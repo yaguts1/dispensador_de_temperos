@@ -312,9 +312,7 @@ noscript {
 }
 
 /* as abas vão para a direita em telas largas */
-.header-row .tabs {
-  margin-top: 5%;
-}
+.header-row .tabs { margin-top: 5%; }
 
 /* no mobile, empilha e alinha pela esquerda */
 @media (max-width: 640px) {
@@ -360,6 +358,7 @@ noscript {
   justify-content: center;
   width: 36px;
   height: 36px;
+  padding: 0 !important;                 /* <- evita herdar o padding global */
   border-radius: 10px;
   border: 1px solid rgba(255,255,255,.08);
   background: #0b1330; /* combina com o tema */
@@ -374,20 +373,26 @@ noscript {
 .icon-btn.dark  { background: #0a1128; color: #fff; }
 .icon-btn.ghost { background: #12204a; color: #cfe0ff; }
 
-/* ===== Ícones (usando CSS mask com os arquivos em ./Assets/) ===== */
-.icon-btn .icon{
+/* Suporte a ícone como <img> ou como <span class="icon"> */
+.icon-btn .icon,
+.icon-btn > img {
   width: 22px;
   height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  flex: 0 0 22px;
   display: block;
-  background: currentColor;         /* cor do ícone = cor do botão */
+  pointer-events: none; /* clique pega o botão inteiro */
 }
+
+/* ===== Ícones via CSS mask com arquivos em ./Assets/ ===== */
+.icon-btn .icon { background: currentColor; }
 
 /* lápis (editar) */
 .icon-edit{
   -webkit-mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
           mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
 }
-
 /* lixeira (excluir) */
 .icon-trash{
   -webkit-mask: url("./Assets/delete-svgrepo-com.svg") no-repeat center / contain;
