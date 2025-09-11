@@ -395,8 +395,8 @@ noscript {
 }
 /* lixeira (excluir) */
 .icon-trash{
-  -webkit-mask: url("./Assets/delete-svgrepo-com.svg") no-repeat center / contain;
-          mask: url("./Assets/delete-svgrepo-com.svg") no-repeat center / contain;
+  -webkit-mask: url("./Assets/delete-2-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/delete-2-svgrepo-com.svg") no-repeat center / contain;
 }
 
 /* =========================== */
