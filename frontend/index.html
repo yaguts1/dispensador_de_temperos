@@ -28,35 +28,42 @@
     <!-- PANE: CONSULTAR (padrão visível) -->
     <section id="pane-consultar" role="tabpanel" aria-labelledby="tab-consultar">
       <div class="card">
-      <div class="search-bar">
-        <input
-          id="q"
-          type="text"
-          placeholder="Busque por nome (ex.: Vinagrete)"
-          autocomplete="off"
-          list="listaSugestoes"
-        />
-        <datalist id="listaSugestoes"></datalist>
+        <div class="search-bar">
+          <input
+            id="q"
+            type="text"
+            placeholder="Busque por nome (ex.: Vinagrete)"
+            autocomplete="off"
+            list="listaSugestoes"
+          />
+          <datalist id="listaSugestoes"></datalist>
 
-        <button id="btnBuscar" type="button" class="primary">Buscar</button>
-        <button id="btnListar" type="button" class="ghost">Listar todas</button>
-      </div>
-
+          <button id="btnBuscar" type="button" class="primary">Buscar</button>
+          <button id="btnListar" type="button" class="ghost">Listar todas</button>
+        </div>
 
         <div id="lista" class="recipe-list" aria-live="polite"></div>
       </div>
 
-      <!-- Template de card com botões Editar/Excluir -->
+      <!-- Template de card com ícones locais (Assets) -->
       <template id="tpl-receita">
-        <div class="recipe-item">
+        <article class="recipe-item">
+          <!-- Ações no canto superior direito -->
+          <div class="card-actions">
+            <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
+              <img src="./Assets/pencil-svgrepo-com.svg" width="18" height="18" alt="" aria-hidden="true">
+            </button>
+            <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
+              <img src="./Assets/delete-svgrepo-com.svg" width="18" height="18" alt="" aria-hidden="true">
+            </button>
+          </div>
+
           <h4 data-el="nome">Nome da Receita</h4>
           <small class="form-hint">ID: <span data-el="id">—</span></small>
-          <div class="recipe-tags" data-el="tags"></div>
-          <div class="actions" style="margin-top:10px">
-            <button type="button" class="ghost" data-action="editar">Editar</button>
-            <button type="button" class="dark" data-action="excluir">Excluir</button>
-          </div>
-        </div>
+
+          <!-- Lista rica dos ingredientes -->
+          <ul class="ingredients" data-el="ings"></ul>
+        </article>
       </template>
     </section>
 
