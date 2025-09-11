@@ -591,64 +591,62 @@ class App {
       return;
     }
 
-    recipes.forEach(recipe => {
-      const tpl = this.els.tplCard?.content?.firstElementChild;
-      let item;
+    // Sempre gera o card com ícones inline (sem depender de <template>)
+    for (const recipe of recipes) {
+      const item = document.createElement('article');
+      item.className = 'recipe-item';
+      item.dataset.id = String(recipe.id);
 
-      if (tpl) {
-        // Caminho com template (ícones no canto + UL de ingredientes)
-        item = tpl.cloneNode(true);
-        item.querySelector('[data-el="nome"]').textContent = recipe.nome || 'Receita sem nome';
-        item.querySelector('[data-el="id"]').textContent = recipe.id ?? '—';
+      item.innerHTML = `
+        <div class="card-actions">
+          <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm14.85-9.9c.2-.2.2-.51 0-.71l-2.49-2.49a.5.5 0 0 0-.71 0l-1.83 1.83 3.75 3.75 1.28-1.28z"/>
+            </svg>
+          </button>
+          <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <path fill="currentColor" d="M6 7h12v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7zm3-3h6l1 1h3v2H5V5h3l1-1z"/>
+            </svg>
+          </button>
+        </div>
 
-        const ul = item.querySelector('[data-el="ings"]');
-        if (ul) {
-          (recipe.ingredientes || []).forEach(ing => ul.appendChild(this._makeIngredientLi(ing)));
-        } else {
-          // Se o template ainda for o antigo, usa os "tags"
-          const tags = item.querySelector('[data-el="tags"]');
-          if (tags) {
-            (recipe.ingredientes || []).forEach(ing => {
-              const tag = document.createElement('span');
-              tag.className = 'recipe-tag';
-              tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
-              tags.appendChild(tag);
-            });
-          }
-        }
+        <h4>${recipe.nome || 'Receita sem nome'}</h4>
+        <small class="form-hint">ID: ${recipe.id || '—'}</small>
+        <ul class="ingredients"></ul>
+      `;
 
-      } else {
-        // Fallback total (monta o card na mão com ícones e UL de ingredientes)
-        item = document.createElement('article');
-        item.className = 'recipe-item';
-        item.innerHTML = `
-          <div class="card-actions">
-            <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm14.85-9.9c.2-.2.2-.51 0-.71l-2.49-2.49a.5.5 0 0 0-.71 0l-1.83 1.83 3.75 3.75 1.28-1.28z"/>
-              </svg>
-            </button>
-            <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
-              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                <path fill="currentColor" d="M6 7h12v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7zm3-3h6l1 1h3v2H5V5h3l1-1z"/>
-              </svg>
-            </button>
-          </div>
-          <h4>${recipe.nome || 'Receita sem nome'}</h4>
-          <small class="form-hint">ID: ${recipe.id || '—'}</small>
-          <ul class="ingredients"></ul>
+      // Preenche a lista rica de ingredientes
+      const ul = item.querySelector('.ingredients');
+      (recipe.ingredientes || []).forEach(ing => {
+        const li = document.createElement('li');
+        li.className = 'ingredient-line';
+
+        const badge = document.createElement('span');
+        badge.className = `reservoir-badge r${ing.frasco}`;
+        badge.innerHTML = `
+          <span class="full">Reservatório ${ing.frasco}</span>
+          <span class="short">R${ing.frasco}</span>
         `;
 
-        const ul = item.querySelector('.ingredients');
-        (recipe.ingredientes || []).forEach(ing => ul.appendChild(this._makeIngredientLi(ing)));
-      }
+        const name = document.createElement('span');
+        name.className = 'ingredient-name';
+        name.textContent = ing.tempero;
 
-      item.dataset.id = String(recipe.id);
+        const qty = document.createElement('span');
+        qty.className = 'qty';
+        qty.textContent = `${ing.quantidade} g`;
+
+        li.append(badge, name, qty);
+        ul.appendChild(li);
+      });
+
       listEl.appendChild(item);
-    });
+    }
 
     if (!quiet) this.toast('Resultados carregados.', 'ok');
   }
+
 
   // ================== Carregar no formulário (Editar) ==================
   async loadRecipeIntoForm(id) {
