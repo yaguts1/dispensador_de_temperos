@@ -17,11 +17,6 @@ const RESERVOIRS = [
   { value: '4', label: 'Reservatório 4' },
 ];
 
-const ICONS = {
-  edit: './Assets/pencil-svgrepo-com.svg',
-  del:  './Assets/delete-svgrepo-com.svg',
-};
-
 // Busca ao digitar
 const AUTOCOMPLETE_MIN_CHARS = 1;
 const TYPING_DEBOUNCE_MS = 200;
@@ -596,7 +591,7 @@ class App {
       return;
     }
 
-    // Sempre gera o card com ícones inline (sem depender de <template>)
+    // Sempre gera o card com ícones usando <span class="icon ..."> (CSS mask)
     for (const recipe of recipes) {
       const item = document.createElement('article');
       item.className = 'recipe-item';
@@ -605,10 +600,10 @@ class App {
       item.innerHTML = `
         <div class="card-actions">
           <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
-            <img src="${ICONS.edit}" width="18" height="18" alt="" aria-hidden="true">
+            <span class="icon icon-edit" aria-hidden="true"></span>
           </button>
           <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
-            <img src="${ICONS.del}" width="18" height="18" alt="" aria-hidden="true">
+            <span class="icon icon-trash" aria-hidden="true"></span>
           </button>
         </div>
 
@@ -617,29 +612,10 @@ class App {
         <ul class="ingredients"></ul>
       `;
 
-
       // Preenche a lista rica de ingredientes
       const ul = item.querySelector('.ingredients');
       (recipe.ingredientes || []).forEach(ing => {
-        const li = document.createElement('li');
-        li.className = 'ingredient-line';
-
-        const badge = document.createElement('span');
-        badge.className = `reservoir-badge r${ing.frasco}`;
-        badge.innerHTML = `
-          <span class="full">Reservatório ${ing.frasco}</span>
-          <span class="short">R${ing.frasco}</span>
-        `;
-
-        const name = document.createElement('span');
-        name.className = 'ingredient-name';
-        name.textContent = ing.tempero;
-
-        const qty = document.createElement('span');
-        qty.className = 'qty';
-        qty.textContent = `${ing.quantidade} g`;
-
-        li.append(badge, name, qty);
+        const li = this._makeIngredientLi(ing);
         ul.appendChild(li);
       });
 
@@ -648,7 +624,6 @@ class App {
 
     if (!quiet) this.toast('Resultados carregados.', 'ok');
   }
-
 
   // ================== Carregar no formulário (Editar) ==================
   async loadRecipeIntoForm(id) {

@@ -324,23 +324,18 @@ noscript {
     gap: 8px;
   }
   .header-row .tabs {
-    margin-left: 0;         /* alinha com o h1 */
-    width: 100%;            /* ocupa toda a largura */
+    margin-left: 0;
+    width: 100%;
   }
-  .header-row .tabs button {
-    flex: 1;                /* botões com a mesma largura */
-  }
-  .tabs { display: flex; }  /* garante flex no mobile também */
+  .header-row .tabs button { flex: 1; }
+  .tabs { display: flex; }
 }
 
 /* opcional: dá o mesmo recuo visual do restante do conteúdo */
 .container { padding-inline: 16px; }
 
 /* opcional: deixa o h1 e os botões “assentarem” melhor */
-.site-header h1 {
-  line-height: 1.2;
-  margin: 0;
-}
+.site-header h1 { line-height: 1.2; margin: 0; }
 .tabs button { margin: 0; }
 
 /* ===================== */
@@ -376,8 +371,28 @@ noscript {
   transform: translateY(-1px);
   box-shadow: 0 4px 10px rgba(79,124,255,.25);
 }
-.icon-btn.dark { background: #0a1128; color: #fff; }
+.icon-btn.dark  { background: #0a1128; color: #fff; }
 .icon-btn.ghost { background: #12204a; color: #cfe0ff; }
+
+/* ===== Ícones (usando CSS mask com os arquivos em ./Assets/) ===== */
+.icon-btn .icon{
+  width: 22px;
+  height: 22px;
+  display: block;
+  background: currentColor;         /* cor do ícone = cor do botão */
+}
+
+/* lápis (editar) */
+.icon-edit{
+  -webkit-mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
+}
+
+/* lixeira (excluir) */
+.icon-trash{
+  -webkit-mask: url("./Assets/delete-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/delete-svgrepo-com.svg") no-repeat center / contain;
+}
 
 /* =========================== */
 /* Lista rica de ingredientes  */
@@ -399,9 +414,7 @@ noscript {
   border-radius: 10px;
   padding: 8px 10px;
 }
-.ingredient-name {
-  font-weight: 700;
-}
+.ingredient-name { font-weight: 700; }
 .qty {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
@@ -432,5 +445,3 @@ noscript {
   .reservoir-badge .full { display: none; }
   .reservoir-badge .short { display: inline; }
 }
-
-.icon-btn img { width: 18px; height: 18px; display: block; }

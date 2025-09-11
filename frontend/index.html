@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Dispenser de Temperos</title>
   <link rel="stylesheet" href="style.css" />
+  <!-- evita 404 do favicon -->
+  <link rel="icon" href="./Assets/pencil-svgrepo-com.svg" type="image/svg+xml" />
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -51,10 +53,10 @@
           <!-- Ações no canto superior direito -->
           <div class="card-actions">
             <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
-              <img src="./Assets/pencil-svgrepo-com.svg" width="18" height="18" alt="" aria-hidden="true">
+              <span class="icon icon-edit" aria-hidden="true"></span>
             </button>
             <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
-              <img src="./Assets/delete-svgrepo-com.svg" width="18" height="18" alt="" aria-hidden="true">
+              <span class="icon icon-trash" aria-hidden="true"></span>
             </button>
           </div>
 
