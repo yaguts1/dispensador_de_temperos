@@ -17,6 +17,10 @@ const RESERVOIRS = [
   { value: '4', label: 'Reservatório 4' },
 ];
 
+// Busca ao digitar
+const AUTOCOMPLETE_MIN_CHARS = 1;
+const TYPING_DEBOUNCE_MS = 200;
+
 // ================== App ==================
 class App {
   constructor() {
@@ -43,7 +47,7 @@ class App {
       editNome: document.getElementById('editNome'),
       editId: document.getElementById('editId'),
 
-      // consulta (novo: por nome com autocomplete)
+      // consulta (por nome com autocomplete)
       buscaNome: document.getElementById('q'),
       listaSugestoes: document.getElementById('listaSugestoes'),
       btnBuscar: document.getElementById('btnBuscar'),
@@ -56,8 +60,10 @@ class App {
       toast: document.getElementById('toast'),
     };
 
-    // timer para debounce das sugestões
-    this._sugestTimer = null;
+    // controle de debounce / abort
+    this._typeTimer = null;
+    this._suggestAbort = null;
+    this._searchAbort = null;
 
     this.init();
   }
@@ -95,15 +101,11 @@ class App {
       if (ok) this.excluirReceita(id);
     });
 
-    // Consulta (novo fluxo por nome + autocomplete)
+    // Consulta: busca ao digitar + Enter + Botão
     if (this.els.buscaNome) {
-      this.els.buscaNome.addEventListener('input', () => this.handleSuggestDebounced());
-      this.els.buscaNome.addEventListener('change', () => this.handleSearchByText());
+      this.els.buscaNome.addEventListener('input', () => this.handleLiveInputDebounced());
       this.els.buscaNome.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          this.handleSearchByText();
-        }
+        if (e.key === 'Enter') { e.preventDefault(); this.handleSearchByText(); }
       });
     }
     this.els.btnBuscar.addEventListener('click', () => this.handleSearchByText());
@@ -113,7 +115,7 @@ class App {
     this.els.lista.addEventListener('click', async (e) => {
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
-      const card = btn.closest('.recipe-item');
+      const card = btn.closest('.recipe-item, article.recipe-item');
       const id = Number(card?.dataset?.id);
       if (!id) return;
 
@@ -446,26 +448,54 @@ class App {
     return input;
   }
 
-  // ================== Consulta / Autocomplete ==================
-  handleSuggestDebounced() {
-    clearTimeout(this._sugestTimer);
-    this._sugestTimer = setTimeout(() => this.handleSuggest(), 150);
+  // ================== Consulta / Autocomplete ao digitar ==================
+  handleLiveInputDebounced() {
+    clearTimeout(this._typeTimer);
+    this._typeTimer = setTimeout(() => this.handleLiveInput(), TYPING_DEBOUNCE_MS);
   }
 
-  async handleSuggest() {
+  async handleLiveInput() {
     const q = this.els.buscaNome?.value.trim() ?? '';
-    if (!q) { if (this.els.listaSugestoes) this.els.listaSugestoes.innerHTML = ''; return; }
 
-    try {
-      const resp = await fetch(`${API_URL}/receitas/sugestoes?q=${encodeURIComponent(q)}`);
-      const data = await resp.json();
-      if (!this.els.listaSugestoes) return;
-      this.els.listaSugestoes.innerHTML = data
-        .map(s => `<option value="${s.nome} — #${s.id}"></option>`)
-        .join('');
-    } catch {
-      // silencioso: sem interrupção de UX
+    // Limpa sugestões quando vazio e mostra todas as receitas
+    if (q.length < AUTOCOMPLETE_MIN_CHARS) {
+      if (this.els.listaSugestoes) this.els.listaSugestoes.innerHTML = '';
+      this.handleListAll();
+      return;
     }
+
+    // dispara em paralelo: sugestões + resultados
+    await Promise.allSettled([this.fetchSuggestions(q), this.fetchSearchResults(q, true)]);
+  }
+
+  async fetchSuggestions(q) {
+    try {
+      if (this._suggestAbort) this._suggestAbort.abort();
+      this._suggestAbort = new AbortController();
+      const resp = await fetch(
+        `${API_URL}/receitas/sugestoes?q=${encodeURIComponent(q)}`,
+        { signal: this._suggestAbort.signal }
+      );
+      const data = await resp.json().catch(() => []);
+      if (!this.els.listaSugestoes) return;
+      this.els.listaSugestoes.innerHTML = Array.isArray(data)
+        ? data.map(s => `<option value="${s.nome} — #${s.id}"></option>`).join('')
+        : '';
+    } catch (_) { /* silencioso */ }
+  }
+
+  async fetchSearchResults(q, quiet = false) {
+    try {
+      if (this._searchAbort) this._searchAbort.abort();
+      this._searchAbort = new AbortController();
+      const resp = await fetch(
+        `${API_URL}/receitas/?q=${encodeURIComponent(q)}&limit=100`,
+        { signal: this._searchAbort.signal }
+      );
+      const data = await resp.json().catch(() => []);
+      if (!resp.ok) throw new Error('Erro na busca.');
+      this.renderRecipeList(data, { quiet });
+    } catch (_) { /* silencioso para não poluir enquanto digita */ }
   }
 
   async handleSearchByText() {
@@ -515,7 +545,31 @@ class App {
     }
   }
 
-  renderRecipeList(recipes) {
+  // ---------- helpers de UI do card ----------
+  _makeIngredientLi(ing) {
+    const li = document.createElement('li');
+    li.className = 'ingredient-line';
+
+    const badge = document.createElement('span');
+    badge.className = `reservoir-badge r${ing.frasco}`;
+    badge.innerHTML = `
+      <span class="full">Reservatório ${ing.frasco}</span>
+      <span class="short">R${ing.frasco}</span>
+    `;
+
+    const name = document.createElement('span');
+    name.className = 'ingredient-name';
+    name.textContent = ing.tempero;
+
+    const qty = document.createElement('span');
+    qty.className = 'qty';
+    qty.textContent = `${ing.quantidade} g`;
+
+    li.append(badge, name, qty);
+    return li;
+  }
+
+  renderRecipeList(recipes, { quiet = false } = {}) {
     const listEl = this.els.lista;
     listEl.innerHTML = '';
 
@@ -540,46 +594,60 @@ class App {
     recipes.forEach(recipe => {
       const tpl = this.els.tplCard?.content?.firstElementChild;
       let item;
+
       if (tpl) {
+        // Caminho com template (ícones no canto + UL de ingredientes)
         item = tpl.cloneNode(true);
         item.querySelector('[data-el="nome"]').textContent = recipe.nome || 'Receita sem nome';
         item.querySelector('[data-el="id"]').textContent = recipe.id ?? '—';
-        const tags = item.querySelector('[data-el="tags"]');
-        (recipe.ingredientes || []).forEach(ing => {
-          const tag = document.createElement('span');
-          tag.className = 'recipe-tag';
-          tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
-          tags.appendChild(tag);
-        });
+
+        const ul = item.querySelector('[data-el="ings"]');
+        if (ul) {
+          (recipe.ingredientes || []).forEach(ing => ul.appendChild(this._makeIngredientLi(ing)));
+        } else {
+          // Se o template ainda for o antigo, usa os "tags"
+          const tags = item.querySelector('[data-el="tags"]');
+          if (tags) {
+            (recipe.ingredientes || []).forEach(ing => {
+              const tag = document.createElement('span');
+              tag.className = 'recipe-tag';
+              tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
+              tags.appendChild(tag);
+            });
+          }
+        }
+
       } else {
-        item = document.createElement('div');
+        // Fallback total (monta o card na mão com ícones e UL de ingredientes)
+        item = document.createElement('article');
         item.className = 'recipe-item';
-        item.innerHTML = `<h4>${recipe.nome || 'Receita sem nome'}</h4>
-                          <small class="form-hint">ID: ${recipe.id || '—'}</small>`;
-        const tagsContainer = document.createElement('div');
-        tagsContainer.className = 'recipe-tags';
-        (recipe.ingredientes || []).forEach(ing => {
-          const tag = document.createElement('span');
-          tag.className = 'recipe-tag';
-          tag.textContent = `${ing.tempero} · R${ing.frasco} · ${ing.quantidade}g`;
-          tagsContainer.appendChild(tag);
-        });
-        const actions = document.createElement('div');
-        actions.className = 'actions';
-        actions.style.gridTemplateColumns = '1fr 1fr';
-        actions.style.marginTop = '10px';
-        actions.innerHTML = `
-          <button type="button" class="ghost" data-action="editar">Editar</button>
-          <button type="button" class="dark" data-action="excluir">Excluir</button>`;
-        item.appendChild(tagsContainer);
-        item.appendChild(actions);
+        item.innerHTML = `
+          <div class="card-actions">
+            <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm14.85-9.9c.2-.2.2-.51 0-.71l-2.49-2.49a.5.5 0 0 0-.71 0l-1.83 1.83 3.75 3.75 1.28-1.28z"/>
+              </svg>
+            </button>
+            <button type="button" class="icon-btn dark" data-action="excluir" title="Excluir receita" aria-label="Excluir receita">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+                <path fill="currentColor" d="M6 7h12v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V7zm3-3h6l1 1h3v2H5V5h3l1-1z"/>
+              </svg>
+            </button>
+          </div>
+          <h4>${recipe.nome || 'Receita sem nome'}</h4>
+          <small class="form-hint">ID: ${recipe.id || '—'}</small>
+          <ul class="ingredients"></ul>
+        `;
+
+        const ul = item.querySelector('.ingredients');
+        (recipe.ingredientes || []).forEach(ing => ul.appendChild(this._makeIngredientLi(ing)));
       }
 
       item.dataset.id = String(recipe.id);
       listEl.appendChild(item);
     });
 
-    this.toast('Resultados carregados.', 'ok');
+    if (!quiet) this.toast('Resultados carregados.', 'ok');
   }
 
   // ================== Carregar no formulário (Editar) ==================
