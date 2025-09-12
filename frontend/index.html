@@ -5,51 +5,53 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Dispenser de Temperos</title>
   <link rel="stylesheet" href="style.css" />
-  <!-- evita 404 do favicon -->
   <link rel="icon" href="./Assets/pencil-svgrepo-com.svg" type="image/svg+xml" />
   <script defer src="app.js"></script>
+  <style>
+    /* pequenos ajustes de layout no header */
+    .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .header-top { display: flex; align-items: center; gap: 10px; width: 100%; }
+    #authBox { margin-left: auto; display: flex; gap: 8px; }
+    .header-row .tabs { width: 100%; margin-top: 6px; }
+    @media (min-width: 720px) {
+      .header-top { gap: 16px; }
+      .header-row .tabs { margin-top: 10px; }
+    }
+  </style>
 </head>
 <body>
   <header class="site-header">
     <div class="container">
       <div class="header-row">
-        <h1>Dispenser de Temperos</h1>
+        <div class="header-top">
+          <h1>Dispenser de Temperos</h1>
 
-        <!-- Autenticação (lado direito do header) -->
-        <div id="authBox" class="tabs" aria-label="Sessão">
-          <!-- estado: deslogado -->
-          <button id="btnOpenLogin" type="button">Entrar</button>
-          <button id="btnOpenRegister" type="button" class="ghost">Criar conta</button>
+          <!-- ÚNICO conjunto de botões de autenticação -->
+          <div id="authBox" aria-live="polite">
+            <!-- quando deslogado -->
+            <button id="btnLogin"  type="button" class="ghost">Entrar</button>
+            <button id="btnRegister" type="button" class="dark">Criar conta</button>
 
-          <!-- estado: logado (controlado via JS; começa oculto) -->
-          <span id="userWelcome" class="lead" style="display:none; margin-left:8px;">Olá, <strong id="userNome">—</strong></span>
-          <button id="btnLogout" type="button" class="dark" style="display:none;">Sair</button>
+            <!-- quando logado (o app.js mostra/esconde estes) -->
+            <span id="helloUser" class="lead" hidden>Olá, usuário</span>
+            <button id="btnLogout" type="button" class="ghost" hidden>Sair</button>
+          </div>
         </div>
-      </div>
 
-      <!-- Abas principais -->
-      <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
-        <button id="tab-consultar" role="tab" aria-selected="true" aria-controls="pane-consultar">
-          Consultar Receitas
-        </button>
-        <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
-          Montar Receita
-        </button>
-      </nav>
+      <!-- Abas -->
+        <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
+          <button id="tab-consultar" role="tab" aria-selected="true" aria-controls="pane-consultar">
+            Consultar Receitas
+          </button>
+          <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
+            Montar Receita
+          </button>
+        </nav>
+      </div>
     </div>
   </header>
 
   <main class="container">
-    <!-- Aviso quando não logado -->
-    <section id="pane-auth-required" class="card subtle" hidden>
-      <h3>Entre para ver e gerenciar suas receitas</h3>
-      <p class="hint">Use os botões <strong>Entrar</strong> ou <strong>Criar conta</strong> no topo.</p>
-      <div class="actions" style="grid-template-columns: auto auto;">
-        <button id="ctaLogin" type="button" class="primary">Entrar</button>
-        <button id="ctaRegister" type="button" class="ghost">Criar conta</button>
-      </div>
-    </section>
-
     <!-- PANE: CONSULTAR -->
     <section id="pane-consultar" role="tabpanel" aria-labelledby="tab-consultar">
       <div class="card">
@@ -70,10 +72,9 @@
         <div id="lista" class="recipe-list" aria-live="polite"></div>
       </div>
 
-      <!-- Template de card com ícones locais (Assets) -->
+      <!-- Template de card -->
       <template id="tpl-receita">
         <article class="recipe-item">
-          <!-- Ações no canto superior direito -->
           <div class="card-actions">
             <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
               <span class="icon icon-edit" aria-hidden="true"></span>
@@ -85,8 +86,6 @@
 
           <h4 data-el="nome">Nome da Receita</h4>
           <small class="form-hint">ID: <span data-el="id">—</span></small>
-
-          <!-- Lista rica dos ingredientes -->
           <ul class="ingredients" data-el="ings"></ul>
         </article>
       </template>
@@ -104,7 +103,6 @@
 
         <fieldset>
           <legend>Informações básicas</legend>
-
           <label for="nome">Nome da Receita</label>
           <input
             id="nome"
@@ -116,7 +114,6 @@
             required
             autocomplete="off"
           />
-
           <p class="hint">
             Não repita o <strong>reservatório</strong> na mesma receita.
             Cada ingrediente: <strong>1–500 g</strong>.
@@ -137,7 +134,6 @@
 
           <div class="actions">
             <button type="button" id="addLinha" class="ghost">+ Adicionar ingrediente</button>
-
             <button type="submit" id="btnSalvar" class="primary">Salvar receita</button>
             <button type="button" id="btnAtualizar" class="primary" hidden>Atualizar receita</button>
             <button type="button" id="btnCancelarEdicao" class="ghost" hidden>Cancelar edição</button>
@@ -148,41 +144,33 @@
     </section>
   </main>
 
-  <!-- Dialog: Entrar -->
+  <!-- Diálogo: Login -->
   <dialog id="dlgLogin">
-    <form id="formLogin" method="dialog" class="card" style="min-width:280px">
-      <h3>Entrar</h3>
-      <label for="loginNome">Usuário</label>
-      <input id="loginNome" name="nome" type="text" autocomplete="username" required />
-
-      <label for="loginSenha">Senha</label>
-      <input id="loginSenha" name="senha" type="password" autocomplete="current-password" required />
-
+    <form id="formLogin" class="card" method="dialog">
+      <h3 style="margin:0 0 8px">Entrar</h3>
+      <label for="loginUser">Usuário</label>
+      <input id="loginUser" name="username" autocomplete="username" required />
+      <label for="loginPass">Senha</label>
+      <input id="loginPass" name="password" type="password" autocomplete="current-password" required />
       <div class="actions">
-        <button value="cancel" type="submit" class="ghost">Cancelar</button>
-        <button id="btnSubmitLogin" value="submit" type="submit" class="primary">Entrar</button>
+        <button value="cancel" class="ghost" type="submit">Cancelar</button>
+        <button id="doLogin" value="ok" class="primary" type="submit">Entrar</button>
       </div>
-
-      <p class="hint">Não tem conta? <a href="#" id="linkGoRegister">Criar conta</a></p>
     </form>
   </dialog>
 
-  <!-- Dialog: Criar conta -->
+  <!-- Diálogo: Registro -->
   <dialog id="dlgRegister">
-    <form id="formRegister" method="dialog" class="card" style="min-width:280px">
-      <h3>Criar conta</h3>
-      <label for="regNome">Usuário</label>
-      <input id="regNome" name="nome" type="text" minlength="3" maxlength="80" autocomplete="username" required />
-
-      <label for="regSenha">Senha</label>
-      <input id="regSenha" name="senha" type="password" minlength="4" autocomplete="new-password" required />
-
+    <form id="formRegister" class="card" method="dialog">
+      <h3 style="margin:0 0 8px">Criar conta</h3>
+      <label for="regUser">Usuário</label>
+      <input id="regUser" name="username" autocomplete="username" required />
+      <label for="regPass">Senha</label>
+      <input id="regPass" name="password" type="password" autocomplete="new-password" required />
       <div class="actions">
-        <button value="cancel" type="submit" class="ghost">Cancelar</button>
-        <button id="btnSubmitRegister" value="submit" type="submit" class="primary">Criar conta</button>
+        <button value="cancel" class="ghost" type="submit">Cancelar</button>
+        <button id="doRegister" value="ok" class="primary" type="submit">Criar conta</button>
       </div>
-
-      <p class="hint">Já tem conta? <a href="#" id="linkGoLogin">Entrar</a></p>
     </form>
   </dialog>
 
