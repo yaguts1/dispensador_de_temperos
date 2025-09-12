@@ -1,5 +1,6 @@
 // ================== Configurações ==================
 const API_URL = 'https://api.yaguts.com.br';
+
 const INGREDIENTS = [
   { value: '', label: 'Selecione...' },
   { value: 'pimenta', label: 'Pimenta' },
@@ -21,10 +22,29 @@ const RESERVOIRS = [
 const AUTOCOMPLETE_MIN_CHARS = 1;
 const TYPING_DEBOUNCE_MS = 200;
 
+// -------- fetch helper (com cookies + tratamento de erro) --------
+async function jfetch(url, opts = {}) {
+  const resp = await fetch(url, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    ...opts,
+  });
+  let data = null;
+  try { data = await resp.json(); } catch {}
+  if (!resp.ok) {
+    const err = new Error(data?.detail || `HTTP ${resp.status}`);
+    err.status = resp.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
 // ================== App ==================
 class App {
   constructor() {
     this.state = { isEditing: false, editId: null };
+    this.user = null; // {id, nome} quando logado
 
     this.els = {
       // abas e panes
@@ -53,28 +73,168 @@ class App {
       btnBuscar: document.getElementById('btnBuscar'),
       btnListar: document.getElementById('btnListar'),
       lista: document.getElementById('lista'),
-      tplCard: document.getElementById('tpl-receita'),
 
       // ui
       dlgExcluir: document.getElementById('dlgExcluir'),
       toast: document.getElementById('toast'),
+      headerRow: document.querySelector('.header-row'),
     };
 
-    // controle de debounce / abort
+    // timers / abort
     this._typeTimer = null;
     this._suggestAbort = null;
     this._searchAbort = null;
 
+    // auth modal
+    this.authDlg = null;
+
     this.init();
   }
 
-  init() {
+  // ========= INIT =========
+  async init() {
+    this.injectAuthBox();
     this.bindEvents();
+    await this.refreshAuth(); // tenta descobrir sessão atual
     this.renderIngredientRow(); // primeira linha vazia
     this.selectTab('consultar');
     this.handleListAll();
   }
 
+  // ========= AUTH UI =========
+  injectAuthBox() {
+    const box = document.createElement('div');
+    box.className = 'auth-box';
+    box.style.marginLeft = 'auto';
+    box.style.display = 'flex';
+    box.style.gap = '8px';
+    this.els.headerRow?.appendChild(box);
+    this.els.authBox = box;
+    this.renderAuthBox();
+  }
+
+  renderAuthBox() {
+    if (!this.els.authBox) return;
+    this.els.authBox.innerHTML = '';
+
+    if (this.user) {
+      const hello = document.createElement('span');
+      hello.textContent = `Olá, ${this.user.nome}`;
+      hello.style.alignSelf = 'center';
+      hello.style.opacity = '0.85';
+
+      const btnOut = document.createElement('button');
+      btnOut.className = 'ghost';
+      btnOut.type = 'button';
+      btnOut.textContent = 'Sair';
+      btnOut.addEventListener('click', () => this.logout());
+
+      this.els.authBox.append(hello, btnOut);
+    } else {
+      const btnIn = document.createElement('button');
+      btnIn.className = 'ghost';
+      btnIn.type = 'button';
+      btnIn.textContent = 'Entrar';
+      btnIn.addEventListener('click', () => this.openAuthDialog('login'));
+
+      const btnUp = document.createElement('button');
+      btnUp.className = 'ghost';
+      btnUp.type = 'button';
+      btnUp.textContent = 'Registrar';
+      btnUp.addEventListener('click', () => this.openAuthDialog('register'));
+
+      this.els.authBox.append(btnIn, btnUp);
+    }
+  }
+
+  ensureAuthOrPrompt() {
+    if (this.user) return true;
+    this.openAuthDialog('login');
+    return false;
+  }
+
+  async refreshAuth() {
+    try {
+      const me = await jfetch(`${API_URL}/auth/me`);
+      this.user = me;
+      this.renderAuthBox();
+    } catch (e) {
+      this.user = null;
+      this.renderAuthBox();
+    }
+  }
+
+  openAuthDialog(mode = 'login') {
+    if (!this.authDlg) {
+      const dlg = document.createElement('dialog');
+      dlg.id = 'dlgAuth';
+      dlg.innerHTML = `
+        <form method="dialog" style="min-width: 320px">
+          <h3 id="dlgAuthTitle" style="margin:0 0 8px">Entrar</h3>
+          <label>Usuário</label>
+          <input id="authNome" type="text" autocomplete="username" required />
+          <label>Senha</label>
+          <input id="authSenha" type="password" autocomplete="current-password" required />
+          <div class="actions" style="grid-template-columns: 1fr 1fr">
+            <button value="cancel" class="ghost" type="submit">Cancelar</button>
+            <button id="authSubmit" class="primary" type="button">Confirmar</button>
+          </div>
+          <p class="hint" id="authHint" style="margin-top:6px"></p>
+        </form>`;
+      document.body.appendChild(dlg);
+      this.authDlg = dlg;
+
+      dlg.querySelector('#authSubmit').addEventListener('click', async () => {
+        const nome = dlg.querySelector('#authNome').value.trim();
+        const senha = dlg.querySelector('#authSenha').value;
+        if (!nome || !senha) return;
+
+        try {
+          if (this.authMode === 'register') {
+            await jfetch(`${API_URL}/auth/register`, {
+              method: 'POST',
+              body: JSON.stringify({ nome, senha }),
+            });
+            await jfetch(`${API_URL}/auth/login`, {
+              method: 'POST',
+              body: JSON.stringify({ nome, senha }),
+            });
+            this.toast('Cadastro realizado, bem-vindo!', 'ok');
+          } else {
+            await jfetch(`${API_URL}/auth/login`, {
+              method: 'POST',
+              body: JSON.stringify({ nome, senha }),
+            });
+            this.toast('Login efetuado.', 'ok');
+          }
+          dlg.close();
+          await this.refreshAuth();
+          this.handleListAll();
+        } catch (e) {
+          this.toast(e.message || 'Falha na autenticação', 'err');
+        }
+      });
+    }
+
+    this.authMode = mode;
+    this.authDlg.querySelector('#dlgAuthTitle').textContent =
+      mode === 'register' ? 'Criar conta' : 'Entrar';
+    this.authDlg.querySelector('#authHint').textContent =
+      mode === 'register'
+        ? 'Crie um usuário e senha para acessar suas receitas.'
+        : 'Faça login para ver e editar suas receitas.';
+    this.authDlg.showModal();
+  }
+
+  async logout() {
+    try { await jfetch(`${API_URL}/auth/logout`, { method: 'POST' }); } catch {}
+    this.user = null;
+    this.renderAuthBox();
+    this.toast('Sessão encerrada.', 'ok');
+    this.handleListAll();
+  }
+
+  // ================== Bindings ==================
   bindEvents() {
     // Tabs
     this.els.tabMontar.addEventListener('click', () => this.selectTab('montar'));
@@ -84,17 +244,25 @@ class App {
     if (this.els.form) {
       this.els.form.addEventListener('submit', (e) => {
         e.preventDefault();
+        if (!this.ensureAuthOrPrompt()) return;
         if (this.state.isEditing) this.atualizarReceita();
         else this.salvarReceita();
       });
     }
     this.els.nomeInput.addEventListener('keydown', (e) => this.handleEnterKey(e));
-    this.els.addBtn.addEventListener('click', () => this.handleAddRow());
+    this.els.addBtn.addEventListener('click', () => {
+      if (!this.ensureAuthOrPrompt()) return;
+      this.handleAddRow();
+    });
 
     // Botões de edição no formulário
-    this.els.btnAtualizar.addEventListener('click', () => this.atualizarReceita());
+    this.els.btnAtualizar.addEventListener('click', () => {
+      if (!this.ensureAuthOrPrompt()) return;
+      this.atualizarReceita();
+    });
     this.els.btnCancelarEdicao.addEventListener('click', () => this.setModeCreate());
     this.els.btnExcluirAtual.addEventListener('click', async () => {
+      if (!this.ensureAuthOrPrompt()) return;
       const id = this.state.editId;
       if (!id) return;
       const ok = await this.confirmDelete();
@@ -119,8 +287,12 @@ class App {
       const id = Number(card?.dataset?.id);
       if (!id) return;
 
-      if (btn.dataset.action === 'editar') this.loadRecipeIntoForm(id);
+      if (btn.dataset.action === 'editar') {
+        if (!this.ensureAuthOrPrompt()) return;
+        this.loadRecipeIntoForm(id);
+      }
       if (btn.dataset.action === 'excluir') {
+        if (!this.ensureAuthOrPrompt()) return;
         const ok = await this.confirmDelete();
         if (ok) this.excluirReceita(id);
       }
@@ -135,7 +307,6 @@ class App {
     const color = type === 'err' ? '#ef4444' : (type === 'ok' ? '#22c55e' : 'var(--ink)');
     t.style.backgroundColor = color;
 
-    // reinicia animação
     t.classList.remove('show');
     void t.offsetHeight;
     t.textContent = message;
@@ -348,21 +519,17 @@ class App {
     catch (e) { this.toast(e.message, 'err'); return; }
 
     try {
-      const response = await fetch(`${API_URL}/receitas/`, {
+      await jfetch(`${API_URL}/receitas/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || 'Erro ao salvar (JSON)');
-
       this.toast('Receita salva com sucesso!', 'ok');
       this.setModeCreate();
       this.selectTab('consultar');
       this.handleListAll();
     } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message, 'err');
-      this.fallbackFormSubmit(payload); // apenas criação
     }
   }
 
@@ -374,34 +541,23 @@ class App {
     catch (e) { this.toast(e.message, 'err'); return; }
 
     try {
-      const response = await fetch(`${API_URL}/receitas/${this.state.editId}`, {
+      await jfetch(`${API_URL}/receitas/${this.state.editId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.detail || `HTTP ${response.status}`);
-
       this.toast('Receita atualizada!', 'ok');
       this.setModeCreate();
       this.selectTab('consultar');
       this.handleListAll();
     } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message, 'err');
     }
   }
 
   async excluirReceita(id) {
     try {
-      const response = await fetch(`${API_URL}/receitas/${id}`, { method: 'DELETE' });
-      if (!response.ok) {
-        let msg = `Erro ao excluir (HTTP ${response.status})`;
-        try {
-          const data = await response.json();
-          if (data?.detail) msg = `Erro ao excluir: ${data.detail}`;
-        } catch {}
-        throw new Error(msg);
-      }
+      await jfetch(`${API_URL}/receitas/${id}`, { method: 'DELETE' });
       this.toast('Receita excluída.', 'ok');
 
       if (this.state.isEditing && this.state.editId === id) {
@@ -410,42 +566,9 @@ class App {
       }
       this.handleListAll();
     } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message, 'err');
     }
-  }
-
-  // Fallback de formulário (somente criação)
-  fallbackFormSubmit(payload) {
-    try {
-      const tempForm = document.createElement('form');
-      tempForm.action = `${API_URL}/receitas/form`;
-      tempForm.method = 'POST';
-      tempForm.target = '_blank';
-      tempForm.style.display = 'none';
-
-      tempForm.appendChild(this.createHiddenInput('nome', payload.nome));
-      payload.ingredientes.forEach((it, i) => {
-        const n = i + 1;
-        tempForm.appendChild(this.createHiddenInput(`tempero${n}`, it.tempero));
-        tempForm.appendChild(this.createHiddenInput(`reservatorio${n}`, String(it.frasco)));
-        tempForm.appendChild(this.createHiddenInput(`quantidade${n}`, String(it.quantidade)));
-      });
-
-      document.body.appendChild(tempForm);
-      tempForm.submit();
-      tempForm.remove();
-      this.toast('Enviado via fallback.', 'ok');
-    } catch {
-      this.toast('Não foi possível usar o fallback.', 'err');
-    }
-  }
-
-  createHiddenInput(name, value) {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = name;
-    input.value = value;
-    return input;
   }
 
   // ================== Consulta / Autocomplete ao digitar ==================
@@ -457,14 +580,12 @@ class App {
   async handleLiveInput() {
     const q = this.els.buscaNome?.value.trim() ?? '';
 
-    // Limpa sugestões quando vazio e mostra todas as receitas
     if (q.length < AUTOCOMPLETE_MIN_CHARS) {
       if (this.els.listaSugestoes) this.els.listaSugestoes.innerHTML = '';
       this.handleListAll();
       return;
     }
 
-    // dispara em paralelo: sugestões + resultados
     await Promise.allSettled([this.fetchSuggestions(q), this.fetchSearchResults(q, true)]);
   }
 
@@ -472,11 +593,10 @@ class App {
     try {
       if (this._suggestAbort) this._suggestAbort.abort();
       this._suggestAbort = new AbortController();
-      const resp = await fetch(
+      const data = await jfetch(
         `${API_URL}/receitas/sugestoes?q=${encodeURIComponent(q)}`,
         { signal: this._suggestAbort.signal }
       );
-      const data = await resp.json().catch(() => []);
       if (!this.els.listaSugestoes) return;
       this.els.listaSugestoes.innerHTML = Array.isArray(data)
         ? data.map(s => `<option value="${s.nome} — #${s.id}"></option>`).join('')
@@ -488,46 +608,40 @@ class App {
     try {
       if (this._searchAbort) this._searchAbort.abort();
       this._searchAbort = new AbortController();
-      const resp = await fetch(
+      const data = await jfetch(
         `${API_URL}/receitas/?q=${encodeURIComponent(q)}&limit=100`,
         { signal: this._searchAbort.signal }
       );
-      const data = await resp.json().catch(() => []);
-      if (!resp.ok) throw new Error('Erro na busca.');
       this.renderRecipeList(data, { quiet });
-    } catch (_) { /* silencioso para não poluir enquanto digita */ }
+    } catch (_) { /* silencioso */ }
   }
 
   async handleSearchByText() {
     const txt = this.els.buscaNome?.value.trim() ?? '';
     if (!txt) { this.handleListAll(); return; }
 
-    // se terminar com "#ID", busca direta por id
     const m = txt.match(/#(\d+)\s*$/);
     if (m) {
       const id = Number(m[1]);
       if (Number.isInteger(id) && id > 0) {
         try {
-          const response = await fetch(`${API_URL}/receitas/${id}`);
-          const data = await response.json();
-          if (!response.ok) throw new Error(data?.detail || 'Receita não encontrada.');
+          const data = await jfetch(`${API_URL}/receitas/${id}`);
           this.renderRecipeList([data]);
         } catch (e) {
           this.renderRecipeList([]);
+          if (e.status === 401) this.openAuthDialog('login');
           this.toast(e.message || 'Erro ao buscar', 'err');
         }
         return;
       }
     }
 
-    // caso contrário, filtra por nome
     try {
-      const response = await fetch(`${API_URL}/receitas/?q=${encodeURIComponent(txt)}&limit=100`);
-      const data = await response.json();
-      if (!response.ok) throw new Error('Erro na busca.');
+      const data = await jfetch(`${API_URL}/receitas/?q=${encodeURIComponent(txt)}&limit=100`);
       this.renderRecipeList(data);
     } catch (e) {
-      this.renderRecipeList([]); // mostra CTA de criar
+      this.renderRecipeList([]);
+      if (e.status === 401) this.openAuthDialog('login');
       this.toast(e.message || 'Erro na busca', 'err');
     }
   }
@@ -535,12 +649,16 @@ class App {
   async handleListAll() {
     this.els.lista.innerHTML = '<p class="form-hint">Carregando...</p>';
     try {
-      const response = await fetch(`${API_URL}/receitas/`);
-      const data = await response.json();
-      if (!response.ok) throw new Error('Erro ao listar receitas.');
+      const data = await jfetch(`${API_URL}/receitas/`);
       this.renderRecipeList(data);
     } catch (e) {
-      this.renderRecipeList([]); // mostra CTA de criar
+      if (e.status === 401) {
+        // sem sessão → mostra CTA para login
+        this.renderRecipeList([]);
+        this.toast('Entre para ver suas receitas.', 'err');
+        return;
+      }
+      this.renderRecipeList([]);
       this.toast(e.message || 'Falha ao listar', 'err');
     }
   }
@@ -576,22 +694,25 @@ class App {
     if (!Array.isArray(recipes) || recipes.length === 0) {
       listEl.innerHTML = `
         <div class="recipe-item">
-          <h4>Nenhuma receita cadastrada ainda.</h4>
-          <p class="hint">Que tal começar criando sua primeira receita?</p>
+          <h4>${this.user ? 'Nenhuma receita cadastrada ainda.' : 'Faça login para ver suas receitas.'}</h4>
+          <p class="hint">${this.user ? 'Que tal começar criando sua primeira receita?' : 'Use o botão abaixo para entrar.'}</p>
           <div class="actions" style="grid-template-columns:1fr">
-            <button type="button" id="ctaCriar" class="primary">Criar receita</button>
+            <button type="button" id="ctaPrimario" class="primary">${this.user ? 'Criar receita' : 'Entrar'}</button>
           </div>
         </div>`;
-      const btn = document.getElementById('ctaCriar');
+      const btn = document.getElementById('ctaPrimario');
       if (btn) btn.addEventListener('click', () => {
-        this.setModeCreate();
-        this.selectTab('montar');
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        if (this.user) {
+          this.setModeCreate();
+          this.selectTab('montar');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          this.openAuthDialog('login');
+        }
       });
       return;
     }
 
-    // Sempre gera o card com ícones usando <span class="icon ..."> (CSS mask)
     for (const recipe of recipes) {
       const item = document.createElement('article');
       item.className = 'recipe-item';
@@ -612,12 +733,8 @@ class App {
         <ul class="ingredients"></ul>
       `;
 
-      // Preenche a lista rica de ingredientes
       const ul = item.querySelector('.ingredients');
-      (recipe.ingredientes || []).forEach(ing => {
-        const li = this._makeIngredientLi(ing);
-        ul.appendChild(li);
-      });
+      (recipe.ingredientes || []).forEach(ing => ul.appendChild(this._makeIngredientLi(ing)));
 
       listEl.appendChild(item);
     }
@@ -628,10 +745,7 @@ class App {
   // ================== Carregar no formulário (Editar) ==================
   async loadRecipeIntoForm(id) {
     try {
-      const response = await fetch(`${API_URL}/receitas/${id}`);
-      const recipe = await response.json();
-      if (!response.ok) throw new Error(recipe?.detail || 'Receita não encontrada.');
-
+      const recipe = await jfetch(`${API_URL}/receitas/${id}`);
       this.els.form.reset();
       this.els.nomeInput.value = recipe.nome || '';
 
@@ -655,6 +769,7 @@ class App {
       this.selectTab('montar');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
       this.toast(String(e.message || e), 'err');
     }
   }

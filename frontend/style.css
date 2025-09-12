@@ -19,6 +19,10 @@
 
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Mobile ergonomics */
+  --tap: 44px;                  /* alvo mínimo de toque */
+  --icon: 24px;                 /* tamanho padrão de ícone */
 }
 
 /* ===================== */
@@ -32,6 +36,9 @@ body {
   color: var(--ink);
   background: radial-gradient(1200px 600px at 0% 0%, #10193a 0%, var(--bg) 55%) fixed;
   line-height: 1.5;
+  -webkit-tap-highlight-color: transparent;
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  overscroll-behavior-y: contain;
 }
 
 img, svg { max-width: 100%; display: block; }
@@ -47,17 +54,32 @@ button { font: inherit; }
 /* ===================== */
 /* Header / Tabs         */
 /* ===================== */
-.site-header {
-  padding: 16px 0 6px;
-}
+.site-header { padding: 12px 0 8px; }
 .site-header h1 {
-  margin: 0 0 4px;
-  font-size: clamp(1.9rem, 2.8vw, 1.75rem);
+  margin: 0;
+  line-height: 1.2;
+  font-size: clamp(1.4rem, 6vw, 1.75rem); /* maior no mobile */
   letter-spacing: .2px;
 }
 .lead { color: var(--muted); margin: 6px 0 14px; }
 
-/* Tabs (usa o <nav> existente) */
+.header-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+}
+
+/* Auth box (lado direito do header) */
+#authBox {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#authBox .lead { margin: 0; }
+
+/* Abas principais */
 .tabs {
   display: flex;
   gap: 8px;
@@ -72,15 +94,21 @@ button { font: inherit; }
   border-radius: 999px;
   cursor: pointer;
   font-weight: 700;
+  min-height: var(--tap);
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
 }
 .tabs button[aria-selected="true"] {
   background: var(--primary);
   color: #fff;
 }
-.tabs button:hover {
-  box-shadow: 0 4px 10px rgba(79,124,255,.25);
-  transform: translateY(-2px);
+.tabs button:hover { box-shadow: 0 4px 10px rgba(79,124,255,.25); transform: translateY(-2px); }
+
+/* No mobile, empilha e ocupa toda a largura */
+@media (max-width: 640px) {
+  .header-row { flex-direction: column; align-items: stretch; gap: 10px; }
+  #authBox { order: 2; justify-content: center; flex-wrap: wrap; }
+  .tabs { order: 3; }
+  .tabs button { flex: 1; }
 }
 
 /* ===================== */
@@ -93,10 +121,7 @@ button { font: inherit; }
   padding: 16px;
   margin: 18px 0;
 }
-.card.subtle {
-  background: var(--surface-2);
-  box-shadow: none;
-}
+.card.subtle { background: var(--surface-2); box-shadow: none; }
 
 /* ===================== */
 /* Formulário            */
@@ -113,11 +138,7 @@ legend {
   font-weight: 800;
   color: #dfe6ff;
 }
-label {
-  display: block;
-  font-weight: 700;
-  margin: 8px 0 6px;
-}
+label { display: block; font-weight: 700; margin: 8px 0 6px; }
 .hint, small { color: var(--muted); }
 
 input, select {
@@ -128,13 +149,12 @@ input, select {
   background: #0b1330;
   color: var(--ink);
   outline: none;
+  font-size: 16px; /* evita zoom no iOS */
+  min-height: var(--tap);
   transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 input::placeholder { color: #8b94ac; }
-input:focus, select:focus {
-  border-color: var(--primary);
-  box-shadow: var(--ring);
-}
+input:focus, select:focus { border-color: var(--primary); box-shadow: var(--ring); }
 
 /* remove setinhas do number em alguns navegadores */
 input[type="number"]::-webkit-outer-spin-button,
@@ -158,6 +178,7 @@ button[type="submit"], button[type="button"] {
   font-weight: 800;
   cursor: pointer;
   text-align: center;
+  min-height: var(--tap);
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
 }
 button:hover { transform: translateY(-2px); }
@@ -166,9 +187,7 @@ button.ghost   { background: #12204a; color: #cfe0ff; border: 1px solid #263a7a;
 button.dark    { background: #0a1128; color: #fff; }
 
 /* stack automático em telas estreitas */
-@media (max-width: 700px) {
-  .actions { grid-template-columns: 1fr; }
-}
+@media (max-width: 700px) { .actions { grid-template-columns: 1fr; } }
 
 /* ===================== */
 /* Grid de ingredientes  */
@@ -180,7 +199,7 @@ button.dark    { background: #0a1128; color: #fff; }
   margin: .4rem 0;
 }
 .grid-header div {
-  font-size: .85rem;
+  font-size: .9rem;
   color: #e6ebff;
   background: #1a2870;
   padding: 8px;
@@ -200,7 +219,7 @@ button.dark    { background: #0a1128; color: #fff; }
 
 .mobile-label {
   display: none;
-  font-size: .8rem;
+  font-size: .85rem;
   color: var(--muted);
   margin: 2px 0 4px;
 }
@@ -221,18 +240,18 @@ button.dark    { background: #0a1128; color: #fff; }
   gap: 8px;
   margin-bottom: 12px;
 }
-@media (max-width: 680px) {
-  .search-bar { grid-template-columns: 1fr; }
-}
+@media (max-width: 680px) { .search-bar { grid-template-columns: 1fr; } }
 
-.recipe-list { display: grid; gap: 10px; }
+.recipe-list { display: grid; gap: 12px; }
 .recipe-item {
   background: #0b1330;
   border: 1px solid rgba(255,255,255,.08);
   border-radius: var(--radius);
   padding: 12px;
+  position: relative;
+  padding-right: 72px; /* espaço pros botões no canto */
 }
-.recipe-item h4 { margin: .2rem 0; }
+.recipe-item h4 { margin: .2rem 0; font-size: 1.05rem; }
 
 /* suportar nomes usados pelo JS e os desta folha */
 .recipe-tags, .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -247,140 +266,42 @@ button.dark    { background: #0a1128; color: #fff; }
 }
 
 /* ===================== */
-/* Logs / code           */
-/* ===================== */
-details summary { cursor: pointer; font-weight: 700; }
-pre {
-  white-space: pre-wrap;
-  overflow: auto;
-  background: #0a0f1f;
-  color: #e2e8f0;
-  border-radius: 10px;
-  padding: 12px;
-  font-family: var(--mono);
-  font-size: 13px;
-}
-
-/* ===================== */
-/* Toast                 */
-/* ===================== */
-#toast {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 18px;
-  background: #0a1128;
-  color: #fff;
-  padding: 10px 14px;
-  border-radius: 999px;
-  font-weight: 700;
-  box-shadow: var(--shadow);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .2s, transform .2s;
-  z-index: 50;
-}
-#toast.show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(-4px);
-}
-
-/* ===================== */
-/* Acessibilidade extra  */
-/* ===================== */
-:focus-visible { outline: none; box-shadow: var(--ring); }
-@media (prefers-reduced-motion: reduce) {
-  * { transition: none !important; }
-}
-noscript {
-  display: block;
-  padding: 12px;
-  color: #fff;
-  background: var(--danger);
-  text-align: center;
-  margin-top: 12px;
-}
-
-/* ====== Topo alinhado: título + abas ====== */
-.site-header { padding: 12px 0 4px; }
-
-.header-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
-}
-
-/* as abas vão para a direita em telas largas */
-.header-row .tabs { margin-top: 5%; }
-
-/* no mobile, empilha e alinha pela esquerda */
-@media (max-width: 640px) {
-  .header-row {
-    flex-direction: column;
-    align-items: center;
-    gap: 8px;
-  }
-  .header-row .tabs {
-    margin-left: 0;
-    width: 100%;
-  }
-  .header-row .tabs button { flex: 1; }
-  .tabs { display: flex; }
-}
-
-/* opcional: dá o mesmo recuo visual do restante do conteúdo */
-.container { padding-inline: 16px; }
-
-/* opcional: deixa o h1 e os botões “assentarem” melhor */
-.site-header h1 { line-height: 1.2; margin: 0; }
-.tabs button { margin: 0; }
-
-/* ===================== */
 /* Cards: ícones de ação */
 /* ===================== */
-.recipe-item {
-  position: relative;
-  padding-right: 60px; /* espaço pros botões no canto */
-}
-
 .card-actions {
   position: absolute;
   top: 10px;
   right: 10px;
   display: flex;
-  gap: 6px;
+  gap: 8px;
 }
 
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
-  padding: 0 !important;                 /* <- evita herdar o padding global */
-  border-radius: 10px;
+  width: var(--tap);
+  height: var(--tap);
+  padding: 0 !important;                 /* evita herdar o padding global */
+  border-radius: 12px;
   border: 1px solid rgba(255,255,255,.08);
-  background: #0b1330; /* combina com o tema */
+  background: #0b1330;
   color: #cfe0ff;
   cursor: pointer;
   transition: transform .15s ease, box-shadow .15s ease, background .15s ease, opacity .15s ease;
 }
-.icon-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 10px rgba(79,124,255,.25);
-}
+.icon-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(79,124,255,.25); }
 .icon-btn.dark  { background: #0a1128; color: #fff; }
 .icon-btn.ghost { background: #12204a; color: #cfe0ff; }
 
-/* Suporte a ícone como <img> ou como <span class="icon"> */
+/* Suporte a <img> ou <span class="icon"> */
 .icon-btn .icon,
 .icon-btn > img {
-  width: 22px;
-  height: 22px;
-  min-width: 22px;
-  min-height: 22px;
-  flex: 0 0 22px;
+  width: var(--icon);
+  height: var(--icon);
+  min-width: var(--icon);
+  min-height: var(--icon);
+  flex: 0 0 var(--icon);
   display: block;
   pointer-events: none; /* clique pega o botão inteiro */
 }
@@ -393,7 +314,7 @@ noscript {
   -webkit-mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
           mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
 }
-/* lixeira (excluir) */
+/* lixeira (excluir) — use o arquivo que realmente existe no seu /Assets */
 .icon-trash{
   -webkit-mask: url("./Assets/delete-2-svgrepo-com.svg") no-repeat center / contain;
           mask: url("./Assets/delete-2-svgrepo-com.svg") no-repeat center / contain;
@@ -420,17 +341,14 @@ noscript {
   padding: 8px 10px;
 }
 .ingredient-name { font-weight: 700; }
-.qty {
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
+.qty { color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* Badge do reservatório com cores por frasco */
 .reservoir-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: .86rem;
+  font-size: .9rem;
   font-weight: 700;
   border-radius: 999px;
   padding: 4px 10px;
@@ -449,4 +367,71 @@ noscript {
 @media (max-width: 520px) {
   .reservoir-badge .full { display: none; }
   .reservoir-badge .short { display: inline; }
+}
+
+/* ===================== */
+/* Logs / code           */
+/* ===================== */
+details summary { cursor: pointer; font-weight: 700; }
+pre {
+  white-space: pre-wrap;
+  overflow: auto;
+  background: #0a0f1f;
+  color: #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+/* ===================== */
+/* Dialogs (login/cadastro) */
+/* ===================== */
+dialog {
+  border: 1px solid rgba(255,255,255,.12);
+  background: var(--surface);
+  color: var(--ink);
+  border-radius: 14px;
+  padding: 0;
+  box-shadow: var(--shadow);
+}
+dialog::backdrop {
+  background: rgba(0,0,0,.5);
+  backdrop-filter: blur(2px);
+}
+dialog .card { margin: 0; }
+
+/* ===================== */
+/* Toast                 */
+/* ===================== */
+#toast {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  background: #0a1128;
+  color: #fff;
+  padding: 10px 14px;
+  border-radius: 999px;
+  font-weight: 700;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s, transform .2s;
+  z-index: 50;
+}
+#toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
+
+/* ===================== */
+/* Acessibilidade extra  */
+/* ===================== */
+:focus-visible { outline: none; box-shadow: var(--ring); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+noscript {
+  display: block;
+  padding: 12px;
+  color: #fff;
+  background: var(--danger);
+  text-align: center;
+  margin-top: 12px;
 }

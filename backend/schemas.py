@@ -62,3 +62,13 @@ class SugestaoReceita(BaseModel):
     id: int
     nome: str
     model_config = ConfigDict(from_attributes=True)
+
+class LoginInput(BaseModel):
+    nome: str = Field(..., min_length=1, max_length=80)
+    senha: str = Field(..., min_length=1)
+
+class UsuarioPublic(BaseModel):
+    id: int
+    nome: str
+    model_config = ConfigDict(from_attributes=True)
+

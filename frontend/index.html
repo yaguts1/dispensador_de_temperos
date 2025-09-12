@@ -14,20 +14,43 @@
     <div class="container">
       <div class="header-row">
         <h1>Dispenser de Temperos</h1>
-        <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
-          <button id="tab-consultar" role="tab" aria-selected="true" aria-controls="pane-consultar">
-            Consultar Receitas
-          </button>
-          <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
-            Montar Receita
-          </button>
-        </nav>
+
+        <!-- Autenticação (lado direito do header) -->
+        <div id="authBox" class="tabs" aria-label="Sessão">
+          <!-- estado: deslogado -->
+          <button id="btnOpenLogin" type="button">Entrar</button>
+          <button id="btnOpenRegister" type="button" class="ghost">Criar conta</button>
+
+          <!-- estado: logado (controlado via JS; começa oculto) -->
+          <span id="userWelcome" class="lead" style="display:none; margin-left:8px;">Olá, <strong id="userNome">—</strong></span>
+          <button id="btnLogout" type="button" class="dark" style="display:none;">Sair</button>
+        </div>
       </div>
+
+      <!-- Abas principais -->
+      <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
+        <button id="tab-consultar" role="tab" aria-selected="true" aria-controls="pane-consultar">
+          Consultar Receitas
+        </button>
+        <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
+          Montar Receita
+        </button>
+      </nav>
     </div>
   </header>
 
   <main class="container">
-    <!-- PANE: CONSULTAR (padrão visível) -->
+    <!-- Aviso quando não logado -->
+    <section id="pane-auth-required" class="card subtle" hidden>
+      <h3>Entre para ver e gerenciar suas receitas</h3>
+      <p class="hint">Use os botões <strong>Entrar</strong> ou <strong>Criar conta</strong> no topo.</p>
+      <div class="actions" style="grid-template-columns: auto auto;">
+        <button id="ctaLogin" type="button" class="primary">Entrar</button>
+        <button id="ctaRegister" type="button" class="ghost">Criar conta</button>
+      </div>
+    </section>
+
+    <!-- PANE: CONSULTAR -->
     <section id="pane-consultar" role="tabpanel" aria-labelledby="tab-consultar">
       <div class="card">
         <div class="search-bar">
@@ -69,7 +92,7 @@
       </template>
     </section>
 
-    <!-- PANE: MONTAR (inicialmente oculto) -->
+    <!-- PANE: MONTAR -->
     <section id="pane-montar" role="tabpanel" aria-labelledby="tab-montar" hidden>
       <form id="formReceita" class="card">
         <input type="hidden" id="receitaId" name="receitaId" value="" />
@@ -124,6 +147,44 @@
       </form>
     </section>
   </main>
+
+  <!-- Dialog: Entrar -->
+  <dialog id="dlgLogin">
+    <form id="formLogin" method="dialog" class="card" style="min-width:280px">
+      <h3>Entrar</h3>
+      <label for="loginNome">Usuário</label>
+      <input id="loginNome" name="nome" type="text" autocomplete="username" required />
+
+      <label for="loginSenha">Senha</label>
+      <input id="loginSenha" name="senha" type="password" autocomplete="current-password" required />
+
+      <div class="actions">
+        <button value="cancel" type="submit" class="ghost">Cancelar</button>
+        <button id="btnSubmitLogin" value="submit" type="submit" class="primary">Entrar</button>
+      </div>
+
+      <p class="hint">Não tem conta? <a href="#" id="linkGoRegister">Criar conta</a></p>
+    </form>
+  </dialog>
+
+  <!-- Dialog: Criar conta -->
+  <dialog id="dlgRegister">
+    <form id="formRegister" method="dialog" class="card" style="min-width:280px">
+      <h3>Criar conta</h3>
+      <label for="regNome">Usuário</label>
+      <input id="regNome" name="nome" type="text" minlength="3" maxlength="80" autocomplete="username" required />
+
+      <label for="regSenha">Senha</label>
+      <input id="regSenha" name="senha" type="password" minlength="4" autocomplete="new-password" required />
+
+      <div class="actions">
+        <button value="cancel" type="submit" class="ghost">Cancelar</button>
+        <button id="btnSubmitRegister" value="submit" type="submit" class="primary">Criar conta</button>
+      </div>
+
+      <p class="hint">Já tem conta? <a href="#" id="linkGoLogin">Entrar</a></p>
+    </form>
+  </dialog>
 
   <dialog id="dlgExcluir">
     <form method="dialog" style="min-width: 280px">
