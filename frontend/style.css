@@ -71,13 +71,13 @@ button { font: inherit; }
 }
 
 /* Auth box (lado direito do header) */
-#authBox {
+.auth-box {
   margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
 }
-#authBox .lead { margin: 0; }
+.auth-box .lead { margin: 0; }
 
 /* Abas principais */
 .tabs {

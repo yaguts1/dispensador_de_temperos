@@ -93,7 +93,7 @@ class App {
 
   // ========= INIT =========
   async init() {
-    this.injectAuthBox();
+    this.ensureAuthBox();
     this.bindEvents();
     await this.refreshAuth(); // tenta descobrir sessão atual
     this.renderIngredientRow(); // primeira linha vazia
@@ -102,14 +102,15 @@ class App {
   }
 
   // ========= AUTH UI =========
-  injectAuthBox() {
-    const box = document.createElement('div');
-    box.className = 'auth-box';
-    box.style.marginLeft = 'auto';
-    box.style.display = 'flex';
-    box.style.gap = '8px';
-    this.els.headerRow?.appendChild(box);
-    this.els.authBox = box;
+  // Reaproveita uma .auth-box existente (se houver) ou cria uma nova
+  ensureAuthBox() {
+    this.els.authBox = document.querySelector('.auth-box') || this.els.authBox;
+    if (!this.els.authBox) {
+      const box = document.createElement('div');
+      box.className = 'auth-box';
+      this.els.headerRow?.appendChild(box);
+      this.els.authBox = box;
+    }
     this.renderAuthBox();
   }
 
@@ -120,8 +121,7 @@ class App {
     if (this.user) {
       const hello = document.createElement('span');
       hello.textContent = `Olá, ${this.user.nome}`;
-      hello.style.alignSelf = 'center';
-      hello.style.opacity = '0.85';
+      hello.className = 'lead';
 
       const btnOut = document.createElement('button');
       btnOut.className = 'ghost';
@@ -138,9 +138,9 @@ class App {
       btnIn.addEventListener('click', () => this.openAuthDialog('login'));
 
       const btnUp = document.createElement('button');
-      btnUp.className = 'ghost';
+      btnUp.className = 'dark';
       btnUp.type = 'button';
-      btnUp.textContent = 'Registrar';
+      btnUp.textContent = 'Criar conta';
       btnUp.addEventListener('click', () => this.openAuthDialog('register'));
 
       this.els.authBox.append(btnIn, btnUp);
@@ -176,7 +176,7 @@ class App {
           <label>Senha</label>
           <input id="authSenha" type="password" autocomplete="current-password" required />
           <div class="actions" style="grid-template-columns: 1fr 1fr">
-            <button value="cancel" class="ghost" type="submit">Cancelar</button>
+            <button id="authCancel" type="button" class="ghost">Cancelar</button>
             <button id="authSubmit" class="primary" type="button">Confirmar</button>
           </div>
           <p class="hint" id="authHint" style="margin-top:6px"></p>
@@ -184,6 +184,7 @@ class App {
       document.body.appendChild(dlg);
       this.authDlg = dlg;
 
+      // Confirmar
       dlg.querySelector('#authSubmit').addEventListener('click', async () => {
         const nome = dlg.querySelector('#authNome').value.trim();
         const senha = dlg.querySelector('#authSenha').value;
@@ -212,6 +213,17 @@ class App {
           this.handleListAll();
         } catch (e) {
           this.toast(e.message || 'Falha na autenticação', 'err');
+        }
+      });
+
+      // Cancelar fecha o diálogo mesmo com campos vazios
+      dlg.querySelector('#authCancel').addEventListener('click', () => dlg.close('cancel'));
+
+      // Enter nas inputs = confirmar
+      dlg.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          dlg.querySelector('#authSubmit').click();
         }
       });
     }

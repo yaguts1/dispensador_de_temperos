@@ -7,11 +7,12 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="./Assets/pencil-svgrepo-com.svg" type="image/svg+xml" />
   <script defer src="app.js"></script>
+
+  <!-- Ajustes leves do header -->
   <style>
-    /* pequenos ajustes de layout no header */
     .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .header-top { display: flex; align-items: center; gap: 10px; width: 100%; }
-    #authBox { margin-left: auto; display: flex; gap: 8px; }
+    .auth-box { margin-left: auto; display: flex; gap: 8px; align-items: center; }
     .header-row .tabs { width: 100%; margin-top: 6px; }
     @media (min-width: 720px) {
       .header-top { gap: 16px; }
@@ -25,20 +26,9 @@
       <div class="header-row">
         <div class="header-top">
           <h1>Dispenser de Temperos</h1>
-
-          <!-- ÚNICO conjunto de botões de autenticação -->
-          <div id="authBox" aria-live="polite">
-            <!-- quando deslogado -->
-            <button id="btnLogin"  type="button" class="ghost">Entrar</button>
-            <button id="btnRegister" type="button" class="dark">Criar conta</button>
-
-            <!-- quando logado (o app.js mostra/esconde estes) -->
-            <span id="helloUser" class="lead" hidden>Olá, usuário</span>
-            <button id="btnLogout" type="button" class="ghost" hidden>Sair</button>
-          </div>
+          <!-- A caixa de login é injetada pelo app.js (.auth-box) -->
         </div>
 
-      <!-- Abas -->
         <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
           <button id="tab-consultar" role="tab" aria-selected="true" aria-controls="pane-consultar">
             Consultar Receitas
@@ -144,36 +134,7 @@
     </section>
   </main>
 
-  <!-- Diálogo: Login -->
-  <dialog id="dlgLogin">
-    <form id="formLogin" class="card" method="dialog">
-      <h3 style="margin:0 0 8px">Entrar</h3>
-      <label for="loginUser">Usuário</label>
-      <input id="loginUser" name="username" autocomplete="username" required />
-      <label for="loginPass">Senha</label>
-      <input id="loginPass" name="password" type="password" autocomplete="current-password" required />
-      <div class="actions">
-        <button value="cancel" class="ghost" type="submit">Cancelar</button>
-        <button id="doLogin" value="ok" class="primary" type="submit">Entrar</button>
-      </div>
-    </form>
-  </dialog>
-
-  <!-- Diálogo: Registro -->
-  <dialog id="dlgRegister">
-    <form id="formRegister" class="card" method="dialog">
-      <h3 style="margin:0 0 8px">Criar conta</h3>
-      <label for="regUser">Usuário</label>
-      <input id="regUser" name="username" autocomplete="username" required />
-      <label for="regPass">Senha</label>
-      <input id="regPass" name="password" type="password" autocomplete="new-password" required />
-      <div class="actions">
-        <button value="cancel" class="ghost" type="submit">Cancelar</button>
-        <button id="doRegister" value="ok" class="primary" type="submit">Criar conta</button>
-      </div>
-    </form>
-  </dialog>
-
+  <!-- Diálogo de confirmação de exclusão -->
   <dialog id="dlgExcluir">
     <form method="dialog" style="min-width: 280px">
       <p><strong>Excluir receita?</strong></p>
