@@ -43,17 +43,19 @@ async function jfetch(url, opts = {}) {
 // ================== App ==================
 class App {
   constructor() {
-    this.state = { isEditing: false, editId: null };
+    this.state = { isEditing: false, editId: null, roboLoaded: false };
     this.user = null; // {id, nome} quando logado
 
     this.els = {
       // abas e panes
       tabMontar: document.getElementById('tab-montar'),
       tabConsultar: document.getElementById('tab-consultar'),
+      tabRobo: document.getElementById('tab-robo'),
       paneMontar: document.getElementById('pane-montar'),
       paneConsultar: document.getElementById('pane-consultar'),
+      paneRobo: document.getElementById('pane-robo'),
 
-      // formulário
+      // formulário de receita
       form: document.getElementById('formReceita'),
       nomeInput: document.getElementById('nome'),
       linhas: document.getElementById('linhas'),
@@ -73,6 +75,17 @@ class App {
       btnBuscar: document.getElementById('btnBuscar'),
       btnListar: document.getElementById('btnListar'),
       lista: document.getElementById('lista'),
+
+      // ROBÔ
+      formRobo: document.getElementById('formRobo'),
+      btnSalvarRobo: document.getElementById('btnSalvarRobo'),
+      btnRecarregarRobo: document.getElementById('btnRecarregarRobo'),
+      roboFields: {
+        1: { rotulo: document.getElementById('r1_rotulo'), conteudo: document.getElementById('r1_conteudo'), g: document.getElementById('r1_gps') },
+        2: { rotulo: document.getElementById('r2_rotulo'), conteudo: document.getElementById('r2_conteudo'), g: document.getElementById('r2_gps') },
+        3: { rotulo: document.getElementById('r3_rotulo'), conteudo: document.getElementById('r3_conteudo'), g: document.getElementById('r3_gps') },
+        4: { rotulo: document.getElementById('r4_rotulo'), conteudo: document.getElementById('r4_conteudo'), g: document.getElementById('r4_gps') },
+      },
 
       // ui
       dlgExcluir: document.getElementById('dlgExcluir'),
@@ -251,6 +264,7 @@ class App {
     // Tabs
     this.els.tabMontar.addEventListener('click', () => this.selectTab('montar'));
     this.els.tabConsultar.addEventListener('click', () => this.selectTab('consultar'));
+    this.els.tabRobo.addEventListener('click', () => this.selectTab('robo'));
 
     // Form
     if (this.els.form) {
@@ -281,6 +295,16 @@ class App {
       if (ok) this.excluirReceita(id);
     });
 
+    // Robô
+    this.els.btnSalvarRobo.addEventListener('click', () => {
+      if (!this.ensureAuthOrPrompt()) return;
+      this.saveRobotConfig();
+    });
+    this.els.btnRecarregarRobo.addEventListener('click', () => {
+      if (!this.ensureAuthOrPrompt()) return;
+      this.loadRobotConfig(true);
+    });
+
     // Consulta: busca ao digitar + Enter + Botão
     if (this.els.buscaNome) {
       this.els.buscaNome.addEventListener('input', () => this.handleLiveInputDebounced());
@@ -291,7 +315,7 @@ class App {
     this.els.btnBuscar.addEventListener('click', () => this.handleSearchByText());
     this.els.btnListar.addEventListener('click', () => this.handleListAll());
 
-    // Delegação: cliques em Editar/Excluir dentro da lista
+    // Delegação: cliques em Play/Editar/Excluir dentro da lista
     this.els.lista.addEventListener('click', async (e) => {
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
@@ -299,11 +323,14 @@ class App {
       const id = Number(card?.dataset?.id);
       if (!id) return;
 
-      if (btn.dataset.action === 'editar') {
+      const action = btn.dataset.action;
+      if (action === 'play') {
+        if (!this.ensureAuthOrPrompt()) return;
+        this.runRecipe(id, btn);
+      } else if (action === 'editar') {
         if (!this.ensureAuthOrPrompt()) return;
         this.loadRecipeIntoForm(id);
-      }
-      if (btn.dataset.action === 'excluir') {
+      } else if (action === 'excluir') {
         if (!this.ensureAuthOrPrompt()) return;
         const ok = await this.confirmDelete();
         if (ok) this.excluirReceita(id);
@@ -330,10 +357,20 @@ class App {
 
   selectTab(which) {
     const isMontar = which === 'montar';
+    const isConsultar = which === 'consultar';
+    const isRobo = which === 'robo';
+
     this.els.tabMontar.setAttribute('aria-selected', isMontar);
-    this.els.tabConsultar.setAttribute('aria-selected', !isMontar);
+    this.els.tabConsultar.setAttribute('aria-selected', isConsultar);
+    this.els.tabRobo.setAttribute('aria-selected', isRobo);
+
     this.els.paneMontar.hidden = !isMontar;
-    this.els.paneConsultar.hidden = isMontar;
+    this.els.paneConsultar.hidden = !isConsultar;
+    this.els.paneRobo.hidden = !isRobo;
+
+    if (isRobo && !this.state.roboLoaded) {
+      if (this.ensureAuthOrPrompt()) this.loadRobotConfig();
+    }
   }
 
   setModeCreate() {
@@ -507,7 +544,7 @@ class App {
       const numQuantidade = Number(quantidade);
 
       if (usedReservoirs.has(numReservatorio)) {
-        throw new Error(`O reservatório ${numReservatorio} foi repetido.`);
+        throw new Error(`O reservatório ${numQuantidade} foi repetido.`);
       }
       usedReservoirs.add(numReservatorio);
 
@@ -732,6 +769,9 @@ class App {
 
       item.innerHTML = `
         <div class="card-actions">
+          <button type="button" class="icon-btn primary" data-action="play" title="Executar receita" aria-label="Executar receita">
+            <span class="icon icon-play" aria-hidden="true"></span>
+          </button>
           <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
             <span class="icon icon-edit" aria-hidden="true"></span>
           </button>
@@ -785,6 +825,83 @@ class App {
       this.toast(String(e.message || e), 'err');
     }
   }
+
+  // ================== Robô: carregar / salvar ==================
+  _readRobotFields() {
+    const arr = [];
+    for (let i = 1; i <= 4; i++) {
+      const f = this.els.roboFields[i];
+      const rotulo = f.rotulo.value.trim() || null;
+      const conteudo = f.conteudo.value.trim() || null;
+      const gtxt = f.g.value.trim();
+      const g = gtxt === '' ? null : Number(gtxt);
+      arr.push({ frasco: i, rotulo, conteudo, g_por_seg: Number.isFinite(g) ? g : null });
+    }
+    return arr;
+  }
+
+  _fillRobotFields(items) {
+    // zera
+    for (let i = 1; i <= 4; i++) {
+      const f = this.els.roboFields[i];
+      f.rotulo.value = '';
+      f.conteudo.value = '';
+      f.g.value = '';
+    }
+    // preenche
+    for (const it of (items || [])) {
+      const f = this.els.roboFields[it.frasco];
+      if (!f) continue;
+      f.rotulo.value = it.rotulo ?? '';
+      f.conteudo.value = it.conteudo ?? '';
+      f.g.value = (it.g_por_seg ?? '') === '' ? '' : String(it.g_por_seg);
+    }
+  }
+
+  async loadRobotConfig(forceToast = false) {
+    try {
+      const data = await jfetch(`${API_URL}/config/robo`);
+      this._fillRobotFields(data);
+      this.state.roboLoaded = true;
+      if (forceToast) this.toast('Configuração carregada.', 'ok');
+    } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
+      this.toast(e.message || 'Falha ao carregar configuração', 'err');
+    }
+  }
+
+  async saveRobotConfig() {
+    const payload = this._readRobotFields();
+    try {
+      await jfetch(`${API_URL}/config/robo`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      this.toast('Configuração salva!', 'ok');
+      this.state.roboLoaded = false; // força recarga futura
+    } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
+      this.toast(e.message || 'Falha ao salvar configuração', 'err');
+    }
+  }
+
+  // ================== Play: enviar job ==================
+  async runRecipe(id, btnEl) {
+    try {
+      if (btnEl) btnEl.disabled = true;
+      const data = await jfetch(`${API_URL}/jobs`, {
+        method: 'POST',
+        body: JSON.stringify({ receita_id: id }),
+      });
+      this.toast(data?.detail || 'Receita enviada ao robô!', 'ok');
+    } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
+      const msg = e?.data?.detail || e.message || 'Falha ao iniciar execução';
+      this.toast(msg, 'err');
+    } finally {
+      if (btnEl) btnEl.disabled = false;
+    }
+  }
 }
 
-document.addEventListener('DOMContentLoaded', () => { new App(); });
+document.addEventListener('DOMContentLoaded', () => { window.app = new App(); });

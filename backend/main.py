@@ -44,12 +44,14 @@ COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", ".yaguts.com.br")  # para dev local, 
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "1") == "1"        # produção: 1, dev: 0
 COOKIE_SAMESITE = "Lax"  # subdomínios são "same-site", Lax funciona bem
 
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
     expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_MINUTES))
     to_encode.update({"iat": int(now.timestamp()), "exp": int(expire.timestamp())})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
 
 def set_auth_cookie(resp: Response, token: str) -> None:
     # max_age em segundos (alinha com o exp aproximado)
@@ -66,6 +68,7 @@ def set_auth_cookie(resp: Response, token: str) -> None:
         samesite=COOKIE_SAMESITE,
     )
 
+
 def clear_auth_cookie(resp: Response) -> None:
     resp.delete_cookie(
         key=COOKIE_NAME,
@@ -76,12 +79,14 @@ def clear_auth_cookie(resp: Response) -> None:
         samesite=COOKIE_SAMESITE,
     )
 
+
 def get_db():
     db = database.SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
 
 # ---------------------------------------------------------------------
 # Inicialização
@@ -90,9 +95,11 @@ def get_db():
 def on_startup() -> None:
     models.Base.metadata.create_all(bind=database.engine)
 
+
 @app.get("/")
 def root():
     return {"message": "API do Dispenser de Temperos está no ar 🚀"}
+
 
 # ---------------------------------------------------------------------
 # Auth helpers
@@ -114,6 +121,7 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado.")
     return user
 
+
 # ---------------------------------------------------------------------
 # Usuários / Autenticação
 # ---------------------------------------------------------------------
@@ -127,6 +135,7 @@ def register(payload: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     db.refresh(user)
     return user
 
+
 @app.post("/auth/login", response_model=schemas.Usuario)
 def login(payload: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     user = db.query(models.Usuario).filter(models.Usuario.nome == payload.nome).first()
@@ -137,16 +146,19 @@ def login(payload: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     set_auth_cookie(resp, token)
     return resp
 
+
 @app.post("/auth/logout")
 def logout():
     resp = JSONResponse(status_code=200, content={"detail": "ok"})
     clear_auth_cookie(resp)
     return resp
 
+
 @app.get("/auth/me", response_model=schemas.Usuario)
 def me(current: models.Usuario = Depends(get_current_user)):
     # retorna id e nome
     return schemas.Usuario(id=current.id, nome=current.nome)
+
 
 # (mantém rota antiga se você ainda quiser criar manualmente sem auth)
 @app.post("/usuarios/", response_model=schemas.Usuario)
@@ -159,6 +171,7 @@ def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db))
     db.refresh(db_usuario)
     return db_usuario
 
+
 # ---------------------------------------------------------------------
 # Utilidades de validação/parse
 # ---------------------------------------------------------------------
@@ -169,6 +182,7 @@ def _to_int_or_none(v: Optional[str]) -> Optional[int]:
         return int(v)
     except Exception:
         return None
+
 
 def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> List[schemas.IngredienteBase]:
     itens = list(ingredientes)
@@ -194,6 +208,7 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
 
     return itens
 
+
 def _carregar_receita(db: Session, id: int) -> models.Receita:
     return (
         db.query(models.Receita)
@@ -201,6 +216,7 @@ def _carregar_receita(db: Session, id: int) -> models.Receita:
         .filter(models.Receita.id == id)
         .first()
     )
+
 
 # ---------------------------------------------------------------------
 # Receitas (JSON/Pydantic) — escopo do usuário logado
@@ -222,12 +238,14 @@ def criar_receita(
     db.refresh(db_receita)
 
     for ing in itens:
-        db.add(models.IngredienteReceita(
-            receita_id=db_receita.id,
-            tempero=ing.tempero,
-            frasco=ing.frasco,
-            quantidade=ing.quantidade,
-        ))
+        db.add(
+            models.IngredienteReceita(
+                receita_id=db_receita.id,
+                tempero=ing.tempero,
+                frasco=ing.frasco,
+                quantidade=ing.quantidade,
+            )
+        )
 
     try:
         db.commit()
@@ -236,6 +254,7 @@ def criar_receita(
         raise HTTPException(status_code=400, detail="Não é permitido repetir o mesmo reservatório na receita.")
 
     return _carregar_receita(db, db_receita.id)
+
 
 # LISTA: GET /receitas/?limit=&offset=&q=
 @app.get("/receitas/", response_model=List[schemas.Receita])
@@ -258,6 +277,7 @@ def listar_receitas(
     query = query.offset(offset).limit(limit)
     return list(query)
 
+
 # DETALHE: GET /receitas/{id}
 @app.get("/receitas/{id}", response_model=schemas.Receita)
 def obter_receita(
@@ -269,6 +289,7 @@ def obter_receita(
     if not receita or receita.dono_id != current.id:
         raise HTTPException(status_code=404, detail="Receita não encontrada.")
     return receita
+
 
 # SUGESTÕES: GET /receitas/sugestoes?q=vin&limit=8 (do usuário)
 @app.get("/receitas/sugestoes", response_model=List[schemas.SugestaoReceita])
@@ -291,6 +312,7 @@ def sugerir_receitas(
     )
     return [{"id": r[0], "nome": r[1]} for r in rows]
 
+
 # ATUALIZAR: PUT /receitas/{id}
 @app.put("/receitas/{id}", response_model=schemas.Receita)
 def atualizar_receita(
@@ -312,12 +334,14 @@ def atualizar_receita(
     ).delete(synchronize_session=False)
 
     for ing in itens:
-        db.add(models.IngredienteReceita(
-            receita_id=id,
-            tempero=ing.tempero,
-            frasco=ing.frasco,
-            quantidade=ing.quantidade,
-        ))
+        db.add(
+            models.IngredienteReceita(
+                receita_id=id,
+                tempero=ing.tempero,
+                frasco=ing.frasco,
+                quantidade=ing.quantidade,
+            )
+        )
 
     try:
         db.commit()
@@ -326,6 +350,7 @@ def atualizar_receita(
         raise HTTPException(status_code=400, detail="Não é permitido repetir o mesmo reservatório na receita.")
 
     return _carregar_receita(db, id)
+
 
 # EXCLUIR: DELETE /receitas/{id}
 @app.delete("/receitas/{id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -340,6 +365,7 @@ def excluir_receita(
     db.delete(receita)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 # ---------------------------------------------------------------------
 # Receitas (FORMULÁRIO HTML com até 4 linhas) — usa sessão do cookie
@@ -396,3 +422,66 @@ def criar_receita_form(
     receita_in = schemas.ReceitaCreate(nome=nome, ingredientes=ingredientes_input)
     # reaproveita a função JSON (com dono atual)
     return criar_receita(receita=receita_in, current=current, db=db)
+
+
+# ---------------------------------------------------------------------
+# NOVO: Configuração do Robô (por usuário logado)
+# ---------------------------------------------------------------------
+@app.get("/config/robo", response_model=List[schemas.ReservatorioConfigOut])
+def get_config_robo(
+    db: Session = Depends(get_db),
+    current: models.Usuario = Depends(get_current_user),
+):
+    rows = (
+        db.query(models.ReservatorioConfig)
+        .filter(models.ReservatorioConfig.user_id == current.id)
+        .order_by(models.ReservatorioConfig.frasco.asc())
+        .all()
+    )
+    return rows
+
+
+@app.put("/config/robo", response_model=List[schemas.ReservatorioConfigOut])
+def put_config_robo(
+    itens: List[schemas.ReservatorioConfigIn],
+    db: Session = Depends(get_db),
+    current: models.Usuario = Depends(get_current_user),
+):
+    # valida frascos únicos 1..4
+    vistos = set()
+    for it in itens:
+        if it.frasco in vistos:
+            raise HTTPException(status_code=400, detail=f"Reservatório {it.frasco} duplicado.")
+        vistos.add(it.frasco)
+        if it.frasco < 1 or it.frasco > 4:
+            raise HTTPException(status_code=400, detail="Frasco deve ser 1..4.")
+
+    # upsert por (user_id, frasco)
+    result = []
+    for it in itens:
+        row = (
+            db.query(models.ReservatorioConfig)
+            .filter(
+                models.ReservatorioConfig.user_id == current.id,
+                models.ReservatorioConfig.frasco == it.frasco,
+            )
+            .first()
+        )
+        if not row:
+            row = models.ReservatorioConfig(
+                user_id=current.id,
+                frasco=it.frasco,
+                rotulo=it.rotulo,
+                conteudo=it.conteudo,
+                g_por_seg=it.g_por_seg,
+            )
+            db.add(row)
+        else:
+            row.rotulo = it.rotulo
+            row.conteudo = it.conteudo
+            row.g_por_seg = it.g_por_seg
+        db.flush()
+        result.append(row)
+
+    db.commit()
+    return result

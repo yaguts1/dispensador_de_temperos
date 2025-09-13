@@ -1,5 +1,7 @@
-from typing import List
+from typing import List, Optional
+from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, ConfigDict
+
 
 # ---------------------------
 # Ingredientes / Receitas
@@ -20,6 +22,7 @@ class IngredienteBase(BaseModel):
             raise ValueError("O nome do tempero não pode ser vazio.")
         return v
 
+
 class ReceitaBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=120)
     ingredientes: List[IngredienteBase]
@@ -31,18 +34,21 @@ class ReceitaBase(BaseModel):
             raise ValueError("A receita deve ter entre 1 e 4 ingredientes.")
         return itens
 
+
 class ReceitaCreate(ReceitaBase):
     pass
 
+
 class Ingrediente(IngredienteBase):
     id: int
-    # Pydantic v2
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True)  # Pydantic v2
+
 
 class Receita(ReceitaBase):
     id: int
     ingredientes: List[Ingrediente]
     model_config = ConfigDict(from_attributes=True)
+
 
 # ---------------------------
 # Usuários
@@ -51,24 +57,43 @@ class Receita(ReceitaBase):
 class UsuarioBase(BaseModel):
     nome: str
 
+
 class UsuarioCreate(UsuarioBase):
     senha: str
+
 
 class Usuario(UsuarioBase):
     id: int
     model_config = ConfigDict(from_attributes=True)
-    
+
+
 class SugestaoReceita(BaseModel):
     id: int
     nome: str
     model_config = ConfigDict(from_attributes=True)
 
+
 class LoginInput(BaseModel):
     nome: str = Field(..., min_length=1, max_length=80)
     senha: str = Field(..., min_length=1)
+
 
 class UsuarioPublic(BaseModel):
     id: int
     nome: str
     model_config = ConfigDict(from_attributes=True)
 
+
+# ---------------------------
+# Configuração do Robô (por usuário)
+# ---------------------------
+
+class ReservatorioConfigIn(BaseModel):
+    frasco: int = Field(..., ge=1, le=4)
+    rotulo: Optional[str] = Field(default=None, max_length=80)
+    conteudo: Optional[str] = Field(default=None, max_length=120)
+    g_por_seg: Optional[float] = Field(default=None, gt=0)
+
+
+class ReservatorioConfigOut(ReservatorioConfigIn):
+    updated_at: Optional[datetime] = None

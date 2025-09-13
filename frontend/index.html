@@ -8,7 +8,7 @@
   <link rel="icon" href="./Assets/pencil-svgrepo-com.svg" type="image/svg+xml" />
   <script defer src="app.js"></script>
 
-  <!-- Ajustes leves do header -->
+  <!-- Ajustes leves / ícones extras -->
   <style>
     .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
     .header-top { display: flex; align-items: center; gap: 10px; width: 100%; }
@@ -17,6 +17,36 @@
     @media (min-width: 720px) {
       .header-top { gap: 16px; }
       .header-row .tabs { margin-top: 10px; }
+    }
+
+    /* cor “primary” nos botões de ícone */
+    .icon-btn.primary { background: var(--success); color: #04120a; }
+    /* ícone de play */
+    .icon-play{
+      background: currentColor;
+      -webkit-mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+              mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+    }
+
+    /* grelha da aba Robô (reaproveita estilos existentes) */
+    .robot-grid-header {
+      display: grid;
+      grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
+      gap: 8px;
+      margin: .4rem 0;
+    }
+    .robot-grid-header div{
+      font-size: .9rem; color:#e6ebff; background:#1a2870;
+      padding:8px; border-radius:10px; text-align:center;
+    }
+    .robot-row {
+      display: grid;
+      grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
+      gap: 8px; align-items: center;
+    }
+    @media (max-width: 720px){
+      .robot-grid-header{ display:none; }
+      .robot-row{ grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -35,6 +65,9 @@
           </button>
           <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
             Montar Receita
+          </button>
+          <button id="tab-robo" role="tab" aria-selected="false" aria-controls="pane-robo">
+            Robô
           </button>
         </nav>
       </div>
@@ -62,10 +95,13 @@
         <div id="lista" class="recipe-list" aria-live="polite"></div>
       </div>
 
-      <!-- Template de card -->
+      <!-- Template de card (referência visual) -->
       <template id="tpl-receita">
         <article class="recipe-item">
           <div class="card-actions">
+            <button type="button" class="icon-btn primary" data-action="play" title="Executar receita" aria-label="Executar receita">
+              <span class="icon icon-play" aria-hidden="true"></span>
+            </button>
             <button type="button" class="icon-btn ghost" data-action="editar" title="Editar receita" aria-label="Editar receita">
               <span class="icon icon-edit" aria-hidden="true"></span>
             </button>
@@ -128,6 +164,67 @@
             <button type="button" id="btnAtualizar" class="primary" hidden>Atualizar receita</button>
             <button type="button" id="btnCancelarEdicao" class="ghost" hidden>Cancelar edição</button>
             <button type="button" id="btnExcluirAtual" class="dark" hidden>Excluir receita</button>
+          </div>
+        </fieldset>
+      </form>
+    </section>
+
+    <!-- PANE: ROBÔ -->
+    <section id="pane-robo" role="tabpanel" aria-labelledby="tab-robo" hidden>
+      <form id="formRobo" class="card">
+        <fieldset>
+          <legend>Configuração do Robô</legend>
+          <p class="hint">Mapeie o que há em cada reservatório e (opcionalmente) a calibração em gramas por segundo.</p>
+
+          <div class="robot-grid-header" aria-hidden="true">
+            <div>Reservatório</div>
+            <div>Rótulo</div>
+            <div>Conteúdo</div>
+            <div>g/s</div>
+          </div>
+
+          <div id="roboRows" class="grid-rows">
+            <!-- R1 -->
+            <div class="robot-row">
+              <div>
+                <span class="reservoir-badge r1"><span class="full">Reservatório 1</span><span class="short">R1</span></span>
+              </div>
+              <div><span class="mobile-label">Rótulo</span><input id="r1_rotulo" autocomplete="off" placeholder="Ex.: Pimenta" /></div>
+              <div><span class="mobile-label">Conteúdo</span><input id="r1_conteudo" autocomplete="off" placeholder="Ex.: moída" /></div>
+              <div><span class="mobile-label">g/s</span><input id="r1_gps" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Ex.: 1.25" /></div>
+            </div>
+            <!-- R2 -->
+            <div class="robot-row">
+              <div>
+                <span class="reservoir-badge r2"><span class="full">Reservatório 2</span><span class="short">R2</span></span>
+              </div>
+              <div><span class="mobile-label">Rótulo</span><input id="r2_rotulo" autocomplete="off" placeholder="Ex.: Sal" /></div>
+              <div><span class="mobile-label">Conteúdo</span><input id="r2_conteudo" autocomplete="off" /></div>
+              <div><span class="mobile-label">g/s</span><input id="r2_gps" type="number" min="0" step="0.01" inputmode="decimal" /></div>
+            </div>
+            <!-- R3 -->
+            <div class="robot-row">
+              <div>
+                <span class="reservoir-badge r3"><span class="full">Reservatório 3</span><span class="short">R3</span></span>
+              </div>
+              <div><span class="mobile-label">Rótulo</span><input id="r3_rotulo" autocomplete="off" /></div>
+              <div><span class="mobile-label">Conteúdo</span><input id="r3_conteudo" autocomplete="off" /></div>
+              <div><span class="mobile-label">g/s</span><input id="r3_gps" type="number" min="0" step="0.01" inputmode="decimal" /></div>
+            </div>
+            <!-- R4 -->
+            <div class="robot-row">
+              <div>
+                <span class="reservoir-badge r4"><span class="full">Reservatório 4</span><span class="short">R4</span></span>
+              </div>
+              <div><span class="mobile-label">Rótulo</span><input id="r4_rotulo" autocomplete="off" /></div>
+              <div><span class="mobile-label">Conteúdo</span><input id="r4_conteudo" autocomplete="off" /></div>
+              <div><span class="mobile-label">g/s</span><input id="r4_gps" type="number" min="0" step="0.01" inputmode="decimal" /></div>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button type="button" id="btnSalvarRobo" class="primary">Salvar configuração</button>
+            <button type="button" id="btnRecarregarRobo" class="ghost">Recarregar</button>
           </div>
         </fieldset>
       </form>
