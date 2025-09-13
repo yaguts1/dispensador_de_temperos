@@ -461,7 +461,7 @@ def put_config_robo(
 
 
 # ---------------------------------------------------------------------
-# Jobs — enfileirar execução
+# Jobs — enfileirar execução (mapeamento dinâmico por rótulo)
 # ---------------------------------------------------------------------
 def _resolver_mapeamento(
     db: Session, user_id: int, ingredientes: List[models.IngredienteReceita]
@@ -483,7 +483,6 @@ def _resolver_mapeamento(
         nome = ing.tempero.strip()
         q_g = int(ing.quantidade)
 
-        # todos os frascos do usuário com mesmo rótulo (case-insensitive)
         configs = (
             db.query(models.ReservatorioConfig)
             .filter(
@@ -491,7 +490,6 @@ def _resolver_mapeamento(
                 func.lower(models.ReservatorioConfig.rotulo) == func.lower(nome),
             )
             .order_by(
-                # preferir g/s definido (desc nulls last) e frasco asc
                 (models.ReservatorioConfig.g_por_seg.isnot(None)).desc(),
                 models.ReservatorioConfig.frasco.asc(),
             )
@@ -541,7 +539,6 @@ def criar_job(
     itens_mapeados, faltam_map, faltam_cal = _resolver_mapeamento(db, current.id, receita.ingredientes)
 
     if faltam_map:
-        # nomes únicos ordenados
         faltam_map = sorted(set(faltam_map), key=str.lower)
         raise HTTPException(
             status_code=409,
@@ -566,7 +563,6 @@ def criar_job(
 
     ordem = 1
     for frasco, nome, q_g in itens_mapeados:
-        # buscar g/s do frasco escolhido
         cfg = (
             db.query(models.ReservatorioConfig)
             .filter(
@@ -576,7 +572,6 @@ def criar_job(
             .first()
         )
         gps = (cfg.g_por_seg or 0.0)
-        # total = quantidade * multiplicador
         total_g = q_g * payload.multiplicador
         segundos = round(float(total_g) / float(gps), 3) if gps > 0 else 0.0
 
@@ -595,7 +590,6 @@ def criar_job(
 
     db.commit()
     db.refresh(job)
-    # recarrega com itens
     job = (
         db.query(models.Job)
         .options(selectinload(models.Job.itens))

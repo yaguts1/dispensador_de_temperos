@@ -38,6 +38,11 @@ class App {
     this.state = { isEditing: false, editId: null, roboLoaded: false };
     this.user = null; // {id, nome} quando logado
 
+    // cache/config do robô
+    this.robotCfg = [];           // array bruto do backend
+    this.robotCfgIndex = {};      // { rotuloLower: [ {frasco, rotulo, g_por_seg} ] }
+    this.robotCfgLoaded = false;
+
     this.els = {
       // abas e panes
       tabMontar: document.getElementById('tab-montar'),
@@ -101,6 +106,7 @@ class App {
     this.ensureAuthBox();
     this.bindEvents();
     await this.refreshAuth(); // tenta descobrir sessão atual
+    if (this.user) { await this.loadRobotConfig(); } // já deixa mapeamento pronto
     this.renderIngredientRow(); // primeira linha vazia
     this.selectTab('consultar');
     this.handleListAll();
@@ -215,6 +221,7 @@ class App {
           }
           dlg.close();
           await this.refreshAuth();
+          if (this.user) { await this.loadRobotConfig(); }
           this.handleListAll();
         } catch (e) {
           this.toast(e.message || 'Falha na autenticação', 'err');
@@ -246,6 +253,9 @@ class App {
   async logout() {
     try { await jfetch(`${API_URL}/auth/logout`, { method: 'POST' }); } catch {}
     this.user = null;
+    this.robotCfg = [];
+    this.robotCfgIndex = {};
+    this.robotCfgLoaded = false;
     this.renderAuthBox();
     this.toast('Sessão encerrada.', 'ok');
     this.handleListAll();
@@ -684,10 +694,69 @@ class App {
     }
   }
 
+  // ---------- helpers mapeamento ----------
+  _indexRobotCfg(items) {
+    const idx = {};
+    for (const it of (items || [])) {
+      const key = (it.rotulo || '').trim().toLowerCase();
+      if (!key) continue;
+      if (!idx[key]) idx[key] = [];
+      idx[key].push({ frasco: it.frasco, rotulo: it.rotulo, g_por_seg: it.g_por_seg ?? null });
+      // ordenar: com g/s primeiro; menor frasco primeiro
+      idx[key].sort((a, b) => {
+        const ag = a.g_por_seg != null ? 1 : 0;
+        const bg = b.g_por_seg != null ? 1 : 0;
+        if (ag !== bg) return bg - ag;
+        return a.frasco - b.frasco;
+      });
+    }
+    return idx;
+  }
+
+  resolveReservoirFor(tempero) {
+    const key = (tempero || '').trim().toLowerCase();
+    const arr = this.robotCfgIndex[key];
+    if (!arr || arr.length === 0) return null;
+    return arr[0]; // melhor candidato (ver _indexRobotCfg)
+  }
+
+  resolveMapping(ingredientes) {
+    const missingMap = [];
+    const missingCal = [];
+    const mapped = [];
+
+    for (const ing of (ingredientes || [])) {
+      const m = this.resolveReservoirFor(ing.tempero);
+      if (!m) {
+        missingMap.push(ing.tempero);
+        continue;
+      }
+      if (m.g_por_seg == null || m.g_por_seg <= 0) {
+        missingCal.push(ing.tempero);
+      }
+      mapped.push({ ...m, quantidade: ing.quantidade, tempero: ing.tempero });
+    }
+
+    return { mapped, missingMap, missingCal };
+  }
+
   // ---------- helpers de UI do card ----------
   _makeIngredientLi(ing) {
     const li = document.createElement('li');
     li.className = 'ingredient-line';
+
+    const badgeWrap = document.createElement('span');
+    const mapping = this.resolveReservoirFor(ing.tempero);
+    if (mapping) {
+      // mostra Rn (rótulo)
+      const badge = document.createElement('span');
+      badge.className = `reservoir-badge r${mapping.frasco}`;
+      badge.innerHTML = `
+        <span class="full">R${mapping.frasco} (${mapping.rotulo || ing.tempero})</span>
+        <span class="short">R${mapping.frasco}</span>
+      `;
+      badgeWrap.appendChild(badge);
+    }
 
     const name = document.createElement('span');
     name.className = 'ingredient-name';
@@ -697,7 +766,7 @@ class App {
     qty.className = 'qty';
     qty.textContent = `${ing.quantidade} g`;
 
-    li.append(name, qty);
+    li.append(badgeWrap, name, qty);
     return li;
   }
 
@@ -823,13 +892,23 @@ class App {
   async loadRobotConfig(forceToast = false) {
     try {
       const data = await jfetch(`${API_URL}/config/robo`);
-      this._fillRobotFields(data);
+      this.robotCfg = Array.isArray(data) ? data : [];
+      this.robotCfgIndex = this._indexRobotCfg(this.robotCfg);
+      this._fillRobotFields(this.robotCfg);
       this.state.roboLoaded = true;
+      this.robotCfgLoaded = true;
       if (forceToast) this.toast('Configuração carregada.', 'ok');
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message || 'Falha ao carregar configuração', 'err');
     }
+  }
+
+  async ensureRobotConfig() {
+    if (!this.user) return false;
+    if (this.robotCfgLoaded) return true;
+    await this.loadRobotConfig();
+    return this.robotCfgLoaded;
   }
 
   async saveRobotConfig() {
@@ -841,19 +920,41 @@ class App {
       });
       this.toast('Configuração salva!', 'ok');
       this.state.roboLoaded = false; // força recarga futura
+      // atualiza índices locais
+      this.robotCfg = payload;
+      this.robotCfgIndex = this._indexRobotCfg(this.robotCfg);
+      this.robotCfgLoaded = true;
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message || 'Falha ao salvar configuração', 'err');
     }
   }
 
-  // ================== Play: enviar job ==================
+  // ================== Play: pré-checagem + enviar job ==================
   async runRecipe(id, btnEl) {
     try {
       if (btnEl) btnEl.disabled = true;
+
+      // 1) garantir config do robô carregada
+      await this.ensureRobotConfig();
+
+      // 2) obter receita (para checagem local)
+      const recipe = await jfetch(`${API_URL}/receitas/${id}`);
+      const pre = this.resolveMapping(recipe.ingredientes || []);
+
+      if (pre.missingMap.length > 0) {
+        this.toast(`Mapeamento ausente: defina os frascos para ${pre.missingMap.join(', ')} na aba Robô.`, 'err');
+        return;
+      }
+      if (pre.missingCal.length > 0) {
+        this.toast(`Calibração pendente (g/s) para: ${pre.missingCal.join(', ')}. Preencha na aba Robô.`, 'err');
+        return;
+      }
+
+      // 3) tudo ok → enviar job
       const data = await jfetch(`${API_URL}/jobs`, {
         method: 'POST',
-        body: JSON.stringify({ receita_id: id }),
+        body: JSON.stringify({ receita_id: id, multiplicador: 1 }),
       });
       this.toast(data?.detail || 'Receita enviada ao robô!', 'ok');
     } catch (e) {
