@@ -10,14 +10,6 @@ const INGREDIENTS = [
   { value: 'cominho', label: 'Cominho' },
 ];
 
-const RESERVOIRS = [
-  { value: '', label: '—' },
-  { value: '1', label: 'Reservatório 1' },
-  { value: '2', label: 'Reservatório 2' },
-  { value: '3', label: 'Reservatório 3' },
-  { value: '4', label: 'Reservatório 4' },
-];
-
 // Busca ao digitar
 const AUTOCOMPLETE_MIN_CHARS = 1;
 const TYPING_DEBOUNCE_MS = 200;
@@ -229,7 +221,7 @@ class App {
         }
       });
 
-      // Cancelar fecha o diálogo mesmo com campos vazios
+      // Cancelar
       dlg.querySelector('#authCancel').addEventListener('click', () => dlg.close('cancel'));
 
       // Enter nas inputs = confirmar
@@ -449,13 +441,11 @@ class App {
     };
 
     const temperoSelect = renderSelect(INGREDIENTS, { name: `tempero${rowCount + 1}` });
-    const reservatorioSelect = renderSelect(RESERVOIRS, { name: `reservatorio${rowCount + 1}`, disabled: 'true' });
     const quantidadeInput = renderInput('number', {
       name: `quantidade${rowCount + 1}`,
       min: '1',
       max: '500',
       step: '1',
-      disabled: 'true',
       inputmode: 'numeric',
     });
 
@@ -464,16 +454,6 @@ class App {
     removeBtn.type = 'button';
     removeBtn.textContent = 'Remover';
     removeBtn.title = 'Remover linha';
-
-    temperoSelect.addEventListener('change', () => {
-      const hasValue = temperoSelect.value !== '';
-      reservatorioSelect.disabled = !hasValue;
-      quantidadeInput.disabled = !hasValue;
-      if (!hasValue) {
-        reservatorioSelect.value = '';
-        quantidadeInput.value = '';
-      }
-    });
 
     removeBtn.addEventListener('click', () => {
       row.remove();
@@ -491,7 +471,6 @@ class App {
     };
 
     row.appendChild(wrap('Tempero', temperoSelect));
-    row.appendChild(wrap('Reservatório', reservatorioSelect));
     row.appendChild(wrap('Quantidade', quantidadeInput));
     row.appendChild(removeBtn);
 
@@ -503,7 +482,6 @@ class App {
     rows.forEach((row, i) => {
       const n = i + 1;
       row.querySelector('select[name^="tempero"]').name = `tempero${n}`;
-      row.querySelector('select[name^="reservatorio"]').name = `reservatorio${n}`;
       row.querySelector('input[name^="quantidade"]').name = `quantidade${n}`;
     });
   }
@@ -526,37 +504,31 @@ class App {
     }
 
     const ingredientes = [];
-    const usedReservoirs = new Set();
     const rows = [...this.els.linhas.querySelectorAll('.ingredient-row')];
 
     for (const row of rows) {
       const tempero = row.querySelector('select[name^="tempero"]').value;
-      const reservatorio = row.querySelector('select[name^="reservatorio"]').value;
       const quantidade = row.querySelector('input[name^="quantidade"]').value;
 
-      if (!tempero && !reservatorio && !quantidade) continue;
+      if (!tempero && !quantidade) continue;
 
-      if (!tempero || !reservatorio || !quantidade) {
-        throw new Error('Preencha todos os campos dos ingredientes selecionados.');
+      if (!tempero || !quantidade) {
+        throw new Error('Preencha tempero e quantidade nos ingredientes selecionados.');
       }
 
-      const numReservatorio = Number(reservatorio);
       const numQuantidade = Number(quantidade);
-
-      if (usedReservoirs.has(numReservatorio)) {
-        throw new Error(`O reservatório ${numQuantidade} foi repetido.`);
-      }
-      usedReservoirs.add(numReservatorio);
-
       if (!Number.isInteger(numQuantidade) || numQuantidade < 1 || numQuantidade > 500) {
         throw new Error(`A quantidade de ${tempero} deve ser um número inteiro entre 1 e 500.`);
       }
 
-      ingredientes.push({ tempero, frasco: numReservatorio, quantidade: numQuantidade });
+      ingredientes.push({ tempero, quantidade: numQuantidade });
     }
 
     if (ingredientes.length === 0) {
       throw new Error('Adicione pelo menos um ingrediente.');
+    }
+    if (ingredientes.length > 4) {
+      throw new Error('Máximo de 4 ingredientes por receita.');
     }
     return { nome, ingredientes };
   }
@@ -717,13 +689,6 @@ class App {
     const li = document.createElement('li');
     li.className = 'ingredient-line';
 
-    const badge = document.createElement('span');
-    badge.className = `reservoir-badge r${ing.frasco}`;
-    badge.innerHTML = `
-      <span class="full">Reservatório ${ing.frasco}</span>
-      <span class="short">R${ing.frasco}</span>
-    `;
-
     const name = document.createElement('span');
     name.className = 'ingredient-name';
     name.textContent = ing.tempero;
@@ -732,7 +697,7 @@ class App {
     qty.className = 'qty';
     qty.textContent = `${ing.quantidade} g`;
 
-    li.append(badge, name, qty);
+    li.append(name, qty);
     return li;
   }
 
@@ -808,12 +773,9 @@ class App {
         this.renderIngredientRow();
         const row = this.els.linhas.children[idx];
         const temperoSelect = row.querySelector('select[name^="tempero"]');
-        const reservatorioSelect = row.querySelector('select[name^="reservatorio"]');
         const quantidadeInput = row.querySelector('input[name^="quantidade"]');
 
         temperoSelect.value = ing.tempero || '';
-        temperoSelect.dispatchEvent(new Event('change', { bubbles: true }));
-        reservatorioSelect.value = String(ing.frasco ?? '');
         quantidadeInput.value = String(ing.quantidade ?? '');
       });
 

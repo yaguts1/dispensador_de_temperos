@@ -3,17 +3,14 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
 
-# ---------------------------
+# =========================
 # Ingredientes / Receitas
-# ---------------------------
-
+# =========================
 class IngredienteBase(BaseModel):
     tempero: str = Field(..., min_length=1, max_length=60)
-    frasco: int = Field(..., ge=1, le=4)
-    # aceita decimais com precisão de 0.1g
+    # aceita decimais com precisão de 0.1g (internamente arredondamos p/ inteiro)
     quantidade: float = Field(..., gt=0, le=500, multiple_of=0.1)
 
-    # normaliza/valida o texto do tempero
     @field_validator("tempero")
     @classmethod
     def _strip_tempero(cls, v: str) -> str:
@@ -29,7 +26,7 @@ class ReceitaBase(BaseModel):
 
     @field_validator("ingredientes")
     @classmethod
-    def _max_quatro(cls, itens: List[IngredienteBase]) -> List[IngredienteBase]:
+    def _entre_um_e_quatro(cls, itens: List[IngredienteBase]) -> List[IngredienteBase]:
         if not (1 <= len(itens) <= 4):
             raise ValueError("A receita deve ter entre 1 e 4 ingredientes.")
         return itens
@@ -41,7 +38,7 @@ class ReceitaCreate(ReceitaBase):
 
 class Ingrediente(IngredienteBase):
     id: int
-    model_config = ConfigDict(from_attributes=True)  # Pydantic v2
+    model_config = ConfigDict(from_attributes=True)
 
 
 class Receita(ReceitaBase):
@@ -50,10 +47,9 @@ class Receita(ReceitaBase):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ---------------------------
+# =========================
 # Usuários
-# ---------------------------
-
+# =========================
 class UsuarioBase(BaseModel):
     nome: str
 
@@ -84,12 +80,12 @@ class UsuarioPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-# ---------------------------
+# =========================
 # Configuração do Robô (por usuário)
-# ---------------------------
-
+# =========================
 class ReservatorioConfigIn(BaseModel):
     frasco: int = Field(..., ge=1, le=4)
+    # o rótulo deve ser o nome do tempero contido
     rotulo: Optional[str] = Field(default=None, max_length=80)
     conteudo: Optional[str] = Field(default=None, max_length=120)
     g_por_seg: Optional[float] = Field(default=None, gt=0)
@@ -97,3 +93,36 @@ class ReservatorioConfigIn(BaseModel):
 
 class ReservatorioConfigOut(ReservatorioConfigIn):
     updated_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# =========================
+# Jobs
+# =========================
+class JobCreateIn(BaseModel):
+    receita_id: int
+    multiplicador: int = Field(1, ge=1)
+
+
+class JobItemOut(BaseModel):
+    id: int
+    ordem: int
+    frasco: int
+    tempero: str
+    quantidade_g: float
+    segundos: float
+    status: str
+    model_config = ConfigDict(from_attributes=True)
+
+
+class JobOut(BaseModel):
+    id: int
+    status: str
+    receita_id: Optional[int] = None
+    multiplicador: int
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    erro_msg: Optional[str] = None
+    itens: List[JobItemOut] = []
+    model_config = ConfigDict(from_attributes=True)

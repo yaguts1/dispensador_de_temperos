@@ -4,9 +4,9 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.exc import IntegrityError
 from passlib.hash import bcrypt
-from typing import Optional, List, Iterable
+from typing import Optional, List, Iterable, Tuple
 from starlette import status
-from sqlalchemy import func
+from sqlalchemy import func, and_
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 import os
@@ -16,7 +16,7 @@ from . import models, schemas, database
 app = FastAPI(title="API Dispenser de Temperos")
 
 # ---------------------------------------------------------------------
-# CORS (libera front no mesmo domínio/subdomínios e dev local)
+# CORS
 # ---------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -54,8 +54,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def set_auth_cookie(resp: Response, token: str) -> None:
-    # max_age em segundos (alinha com o exp aproximado)
-    max_age = ACCESS_TOKEN_MINUTES * 60
+    max_age = ACCESS_TOKEN_MINUTES * 60  # segundos
     resp.set_cookie(
         key=COOKIE_NAME,
         value=token,
@@ -156,11 +155,10 @@ def logout():
 
 @app.get("/auth/me", response_model=schemas.Usuario)
 def me(current: models.Usuario = Depends(get_current_user)):
-    # retorna id e nome
     return schemas.Usuario(id=current.id, nome=current.nome)
 
 
-# (mantém rota antiga se você ainda quiser criar manualmente sem auth)
+# (rota legacy se ainda quiser criar usuário manualmente sem auth)
 @app.post("/usuarios/", response_model=schemas.Usuario)
 def criar_usuario(usuario: schemas.UsuarioCreate, db: Session = Depends(get_db)):
     if db.query(models.Usuario).filter(models.Usuario.nome == usuario.nome).first():
@@ -189,7 +187,6 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
     if not (1 <= len(itens) <= 4):
         raise HTTPException(status_code=400, detail="A receita precisa ter de 1 a 4 ingredientes.")
 
-    frascos = set()
     for ing in itens:
         # quantidade inteira 1..500
         try:
@@ -200,11 +197,11 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
             raise HTTPException(status_code=400, detail=f"A quantidade de '{ing.tempero}' deve ser um inteiro entre 1 e 500 g.")
         ing.quantidade = q
 
-        if ing.frasco < 1 or ing.frasco > 4:
-            raise HTTPException(status_code=400, detail=f"Reservatório inválido em '{ing.tempero}'. Use valores entre 1 e 4.")
-        if ing.frasco in frascos:
-            raise HTTPException(status_code=400, detail=f"O reservatório {ing.frasco} foi repetido.")
-        frascos.add(ing.frasco)
+        nome = ing.tempero.strip()
+        if not nome:
+            raise HTTPException(status_code=400, detail="O nome do tempero não pode ser vazio.")
+        if len(nome) > 60:
+            raise HTTPException(status_code=400, detail="O nome do tempero deve ter até 60 caracteres.")
 
     return itens
 
@@ -242,21 +239,14 @@ def criar_receita(
             models.IngredienteReceita(
                 receita_id=db_receita.id,
                 tempero=ing.tempero,
-                frasco=ing.frasco,
                 quantidade=ing.quantidade,
             )
         )
 
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Não é permitido repetir o mesmo reservatório na receita.")
-
+    db.commit()
     return _carregar_receita(db, db_receita.id)
 
 
-# LISTA: GET /receitas/?limit=&offset=&q=
 @app.get("/receitas/", response_model=List[schemas.Receita])
 def listar_receitas(
     current: models.Usuario = Depends(get_current_user),
@@ -278,7 +268,6 @@ def listar_receitas(
     return list(query)
 
 
-# DETALHE: GET /receitas/{id}
 @app.get("/receitas/{id}", response_model=schemas.Receita)
 def obter_receita(
     id: int,
@@ -291,7 +280,6 @@ def obter_receita(
     return receita
 
 
-# SUGESTÕES: GET /receitas/sugestoes?q=vin&limit=8 (do usuário)
 @app.get("/receitas/sugestoes", response_model=List[schemas.SugestaoReceita])
 def sugerir_receitas(
     q: str = Query(..., min_length=1),
@@ -313,7 +301,6 @@ def sugerir_receitas(
     return [{"id": r[0], "nome": r[1]} for r in rows]
 
 
-# ATUALIZAR: PUT /receitas/{id}
 @app.put("/receitas/{id}", response_model=schemas.Receita)
 def atualizar_receita(
     id: int,
@@ -338,21 +325,14 @@ def atualizar_receita(
             models.IngredienteReceita(
                 receita_id=id,
                 tempero=ing.tempero,
-                frasco=ing.frasco,
                 quantidade=ing.quantidade,
             )
         )
 
-    try:
-        db.commit()
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Não é permitido repetir o mesmo reservatório na receita.")
-
+    db.commit()
     return _carregar_receita(db, id)
 
 
-# EXCLUIR: DELETE /receitas/{id}
 @app.delete("/receitas/{id}", status_code=status.HTTP_204_NO_CONTENT)
 def excluir_receita(
     id: int,
@@ -368,26 +348,23 @@ def excluir_receita(
 
 
 # ---------------------------------------------------------------------
-# Receitas (FORMULÁRIO HTML com até 4 linhas) — usa sessão do cookie
+# Receitas (FORM HTML com até 4 linhas) — usa cookie de sessão
+# Agora sem "reservatório" no formulário: apenas tempero/quantidade
 # ---------------------------------------------------------------------
 @app.post("/receitas/form", response_model=schemas.Receita, status_code=status.HTTP_201_CREATED)
 def criar_receita_form(
     nome: str = Form(...),
 
     tempero1: Optional[str] = Form(None),
-    reservatorio1: Optional[str] = Form(None),
     quantidade1: Optional[str] = Form(None),
 
     tempero2: Optional[str] = Form(None),
-    reservatorio2: Optional[str] = Form(None),
     quantidade2: Optional[str] = Form(None),
 
     tempero3: Optional[str] = Form(None),
-    reservatorio3: Optional[str] = Form(None),
     quantidade3: Optional[str] = Form(None),
 
     tempero4: Optional[str] = Form(None),
-    reservatorio4: Optional[str] = Form(None),
     quantidade4: Optional[str] = Form(None),
 
     current: models.Usuario = Depends(get_current_user),
@@ -395,23 +372,22 @@ def criar_receita_form(
 ):
     ingredientes_input: List[schemas.IngredienteBase] = []
 
-    for t, r, q in [
-        (tempero1, reservatorio1, quantidade1),
-        (tempero2, reservatorio2, quantidade2),
-        (tempero3, reservatorio3, quantidade3),
-        (tempero4, reservatorio4, quantidade4),
+    for t, q in [
+        (tempero1, quantidade1),
+        (tempero2, quantidade2),
+        (tempero3, quantidade3),
+        (tempero4, quantidade4),
     ]:
-        r_i = _to_int_or_none(r)
         q_i = _to_int_or_none(q)
 
-        if t and r_i is not None and q_i is not None:
+        if t and q_i is not None:
             ingredientes_input.append(
-                schemas.IngredienteBase(tempero=t, frasco=r_i, quantidade=q_i)
+                schemas.IngredienteBase(tempero=t, quantidade=q_i)
             )
-        elif (t or r or q) and not (t and r_i is not None and q_i is not None):
+        elif (t or q) and not (t and q_i is not None):
             raise HTTPException(
                 status_code=400,
-                detail="Preencha todos os campos da linha (tempero, reservatório e quantidade).",
+                detail="Preencha todos os campos da linha (tempero e quantidade).",
             )
 
     if not ingredientes_input:
@@ -420,12 +396,11 @@ def criar_receita_form(
     ingredientes_input = _valida_ingredientes(ingredientes_input)
 
     receita_in = schemas.ReceitaCreate(nome=nome, ingredientes=ingredientes_input)
-    # reaproveita a função JSON (com dono atual)
     return criar_receita(receita=receita_in, current=current, db=db)
 
 
 # ---------------------------------------------------------------------
-# NOVO: Configuração do Robô (por usuário logado)
+# Configuração do Robô (por usuário logado)
 # ---------------------------------------------------------------------
 @app.get("/config/robo", response_model=List[schemas.ReservatorioConfigOut])
 def get_config_robo(
@@ -447,7 +422,6 @@ def put_config_robo(
     db: Session = Depends(get_db),
     current: models.Usuario = Depends(get_current_user),
 ):
-    # valida frascos únicos 1..4
     vistos = set()
     for it in itens:
         if it.frasco in vistos:
@@ -456,7 +430,6 @@ def put_config_robo(
         if it.frasco < 1 or it.frasco > 4:
             raise HTTPException(status_code=400, detail="Frasco deve ser 1..4.")
 
-    # upsert por (user_id, frasco)
     result = []
     for it in itens:
         row = (
@@ -485,3 +458,165 @@ def put_config_robo(
 
     db.commit()
     return result
+
+
+# ---------------------------------------------------------------------
+# Jobs — enfileirar execução
+# ---------------------------------------------------------------------
+def _resolver_mapeamento(
+    db: Session, user_id: int, ingredientes: List[models.IngredienteReceita]
+) -> Tuple[List[Tuple[int, str, int]], List[str], List[str]]:
+    """
+    Retorna:
+      - lista de tuplas (frasco, tempero, quantidade_g) já mapeadas,
+      - lista de temperos com mapeamento ausente,
+      - lista de temperos sem calibração (g/s ausente ou <=0)
+    Regras:
+      - match por rotulo == tempero (case-insensitive)
+      - se vários frascos tiverem o mesmo rótulo, prioriza os com g/s definido; desempate por número do frasco.
+    """
+    itens_mapeados: List[Tuple[int, str, int]] = []
+    faltam_mapeamento: List[str] = []
+    faltam_calibracao: List[str] = []
+
+    for ing in ingredientes:
+        nome = ing.tempero.strip()
+        q_g = int(ing.quantidade)
+
+        # todos os frascos do usuário com mesmo rótulo (case-insensitive)
+        configs = (
+            db.query(models.ReservatorioConfig)
+            .filter(
+                models.ReservatorioConfig.user_id == user_id,
+                func.lower(models.ReservatorioConfig.rotulo) == func.lower(nome),
+            )
+            .order_by(
+                # preferir g/s definido (desc nulls last) e frasco asc
+                (models.ReservatorioConfig.g_por_seg.isnot(None)).desc(),
+                models.ReservatorioConfig.frasco.asc(),
+            )
+            .all()
+        )
+
+        if not configs:
+            faltam_mapeamento.append(nome)
+            continue
+
+        cfg = configs[0]
+        if cfg.g_por_seg is None or cfg.g_por_seg <= 0:
+            faltam_calibracao.append(nome)
+            continue
+
+        itens_mapeados.append((cfg.frasco, nome, q_g))
+
+    return itens_mapeados, faltam_mapeamento, faltam_calibracao
+
+
+@app.post("/jobs", response_model=schemas.JobOut, status_code=status.HTTP_201_CREATED)
+def criar_job(
+    payload: schemas.JobCreateIn,
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # um job por vez por usuário
+    ativo = (
+        db.query(models.Job)
+        .filter(
+            models.Job.user_id == current.id,
+            models.Job.status.in_(("queued", "running")),
+        )
+        .first()
+    )
+    if ativo:
+        raise HTTPException(
+            status_code=409,
+            detail="Robô ocupado: já existe uma execução em andamento ou na fila.",
+        )
+
+    receita = _carregar_receita(db, payload.receita_id)
+    if not receita or receita.dono_id != current.id:
+        raise HTTPException(status_code=404, detail="Receita não encontrada.")
+
+    # mapeamento dinâmico: ingrediente -> frasco (via rotulo)
+    itens_mapeados, faltam_map, faltam_cal = _resolver_mapeamento(db, current.id, receita.ingredientes)
+
+    if faltam_map:
+        # nomes únicos ordenados
+        faltam_map = sorted(set(faltam_map), key=str.lower)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Mapeamento ausente: defina os frascos para {', '.join(faltam_map)} na aba Robô.",
+        )
+    if faltam_cal:
+        faltam_cal = sorted(set(faltam_cal), key=str.lower)
+        raise HTTPException(
+            status_code=409,
+            detail=f"Calibração pendente (g/s) para: {', '.join(faltam_cal)}. Preencha na aba Robô.",
+        )
+
+    # criar job + itens
+    job = models.Job(
+        user_id=current.id,
+        receita_id=receita.id,
+        status="queued",
+        multiplicador=payload.multiplicador,
+    )
+    db.add(job)
+    db.flush()  # para obter job.id
+
+    ordem = 1
+    for frasco, nome, q_g in itens_mapeados:
+        # buscar g/s do frasco escolhido
+        cfg = (
+            db.query(models.ReservatorioConfig)
+            .filter(
+                models.ReservatorioConfig.user_id == current.id,
+                models.ReservatorioConfig.frasco == frasco,
+            )
+            .first()
+        )
+        gps = (cfg.g_por_seg or 0.0)
+        # total = quantidade * multiplicador
+        total_g = q_g * payload.multiplicador
+        segundos = round(float(total_g) / float(gps), 3) if gps > 0 else 0.0
+
+        db.add(
+            models.JobItem(
+                job_id=job.id,
+                ordem=ordem,
+                frasco=frasco,
+                tempero=nome,
+                quantidade_g=float(total_g),
+                segundos=segundos,
+                status="queued",
+            )
+        )
+        ordem += 1
+
+    db.commit()
+    db.refresh(job)
+    # recarrega com itens
+    job = (
+        db.query(models.Job)
+        .options(selectinload(models.Job.itens))
+        .filter(models.Job.id == job.id)
+        .first()
+    )
+    return job
+
+
+@app.get("/jobs/{job_id}", response_model=schemas.JobOut)
+def obter_job(
+    job_id: int,
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = (
+        db.query(models.Job)
+        .options(selectinload(models.Job.itens))
+        .filter(models.Job.id == job_id, models.Job.user_id == current.id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+    return job
