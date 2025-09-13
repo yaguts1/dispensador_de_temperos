@@ -7,48 +7,6 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="./Assets/pencil-svgrepo-com.svg" type="image/svg+xml" />
   <script defer src="app.js"></script>
-
-  <!-- Ajustes leves / ícones extras -->
-  <style>
-    .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-    .header-top { display: flex; align-items: center; gap: 10px; width: 100%; }
-    .auth-box { margin-left: auto; display: flex; gap: 8px; align-items: center; }
-    .header-row .tabs { width: 100%; margin-top: 6px; }
-    @media (min-width: 720px) {
-      .header-top { gap: 16px; }
-      .header-row .tabs { margin-top: 10px; }
-    }
-
-    /* cor “primary” nos botões de ícone */
-    .icon-btn.primary { background: var(--success); color: #04120a; }
-    /* ícone de play */
-    .icon-play{
-      background: currentColor;
-      -webkit-mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
-              mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
-    }
-
-    /* grelha da aba Robô (reaproveita estilos existentes) */
-    .robot-grid-header {
-      display: grid;
-      grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
-      gap: 8px;
-      margin: .4rem 0;
-    }
-    .robot-grid-header div{
-      font-size: .9rem; color:#e6ebff; background:#1a2870;
-      padding:8px; border-radius:10px; text-align:center;
-    }
-    .robot-row {
-      display: grid;
-      grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
-      gap: 8px; align-items: center;
-    }
-    @media (max-width: 720px){
-      .robot-grid-header{ display:none; }
-      .robot-row{ grid-template-columns: 1fr; }
-    }
-  </style>
 </head>
 <body>
   <header class="site-header">
@@ -56,7 +14,7 @@
       <div class="header-row">
         <div class="header-top">
           <h1>Dispenser de Temperos</h1>
-          <!-- A caixa de login é injetada pelo app.js (.auth-box) -->
+          <!-- A caixa de login (.auth-box) é criada e injetada pelo app.js -->
         </div>
 
         <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
@@ -66,8 +24,9 @@
           <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
             Montar Receita
           </button>
-          <button id="tab-robo" role="tab" aria-selected="false" aria-controls="pane-robo">
-            Robô
+          <button id="tab-robo" role="tab" aria-selected="false" aria-controls="pane-robo" class="with-icon">
+            <span class="icon icon-config" aria-hidden="true"></span>
+            <span class="text">Robô</span>
           </button>
         </nav>
       </div>

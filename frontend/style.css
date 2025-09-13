@@ -44,7 +44,6 @@ body {
 img, svg { max-width: 100%; display: block; }
 button { font: inherit; }
 
-/* Container fluido */
 .container {
   width: min(100%, 960px);
   margin-inline: auto;
@@ -58,7 +57,7 @@ button { font: inherit; }
 .site-header h1 {
   margin: 0;
   line-height: 1.2;
-  font-size: clamp(1.4rem, 6vw, 1.75rem); /* maior no mobile */
+  font-size: clamp(1.4rem, 6vw, 1.75rem);
   letter-spacing: .2px;
 }
 .lead { color: var(--muted); margin: 6px 0 14px; }
@@ -66,11 +65,20 @@ button { font: inherit; }
 .header-row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   min-height: 48px;
 }
+.header-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.header-row .tabs { width: 100%; margin-top: 6px; }
+@media (min-width: 720px) { .header-row .tabs { margin-top: 10px; } }
 
-/* Auth box (lado direito do header) */
+/* Auth box */
 .auth-box {
   margin-left: auto;
   display: flex;
@@ -79,7 +87,7 @@ button { font: inherit; }
 }
 .auth-box .lead { margin: 0; }
 
-/* Abas principais */
+/* Tabs */
 .tabs {
   display: flex;
   gap: 8px;
@@ -95,15 +103,11 @@ button { font: inherit; }
   cursor: pointer;
   font-weight: 700;
   min-height: var(--tap);
-  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+  transition: transform .15s, box-shadow .15s, background .15s;
 }
-.tabs button[aria-selected="true"] {
-  background: var(--primary);
-  color: #fff;
-}
+.tabs button[aria-selected="true"] { background: var(--primary); color: #fff; }
 .tabs button:hover { box-shadow: 0 4px 10px rgba(79,124,255,.25); transform: translateY(-2px); }
 
-/* No mobile, empilha e ocupa toda a largura */
 @media (max-width: 640px) {
   .header-row { flex-direction: column; align-items: stretch; gap: 10px; }
   #authBox { order: 2; justify-content: center; flex-wrap: wrap; }
@@ -133,13 +137,9 @@ fieldset {
   margin: 0 0 14px;
   background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.00));
 }
-legend {
-  padding: 0 8px;
-  font-weight: 800;
-  color: #dfe6ff;
-}
+legend { padding: 0 8px; font-weight: 800; color: #dfe6ff; }
 label { display: block; font-weight: 700; margin: 8px 0 6px; }
-.hint, small { color: var(--muted); }
+.hint, small, .form-hint { color: var(--muted); }
 
 input, select {
   width: 100%;
@@ -149,14 +149,12 @@ input, select {
   background: #0b1330;
   color: var(--ink);
   outline: none;
-  font-size: 16px; /* evita zoom no iOS */
+  font-size: 16px;
   min-height: var(--tap);
-  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+  transition: border-color .15s, box-shadow .15s, background .15s;
 }
 input::placeholder { color: #8b94ac; }
 input:focus, select:focus { border-color: var(--primary); box-shadow: var(--ring); }
-
-/* remove setinhas do number em alguns navegadores */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; }
@@ -179,14 +177,12 @@ button[type="submit"], button[type="button"] {
   cursor: pointer;
   text-align: center;
   min-height: var(--tap);
-  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
+  transition: transform .15s, box-shadow .15s, background .15s;
 }
 button:hover { transform: translateY(-2px); }
 button.primary { background: var(--success); color: #04120a; }
 button.ghost   { background: #12204a; color: #cfe0ff; border: 1px solid #263a7a; }
 button.dark    { background: #0a1128; color: #fff; }
-
-/* stack automático em telas estreitas */
 @media (max-width: 700px) { .actions { grid-template-columns: 1fr; } }
 
 /* ===================== */
@@ -206,14 +202,11 @@ button.dark    { background: #0a1128; color: #fff; }
   border-radius: 10px;
   text-align: center;
 }
-
-/* as linhas dinamicamente criadas já recebem .ingredient-row pelo JS */
 .grid-rows { display: grid; gap: 8px; }
 .ingredient-row {
   display: grid;
   grid-template-columns: 1.2fr .9fr 40px;
-  gap: 8px;
-  align-items: center;
+  gap: 8px; align-items: center;
 }
 .ingredient-row + .ingredient-row { margin-top: 0; }
 
@@ -223,8 +216,6 @@ button.dark    { background: #0a1128; color: #fff; }
   color: var(--muted);
   margin: 2px 0 4px;
 }
-
-/* mobile-first: vira uma coluna e mostra labels auxiliares */
 @media (max-width: 720px) {
   .grid-header { display: none; }
   .ingredient-row { grid-template-columns: 1fr; }
@@ -249,11 +240,11 @@ button.dark    { background: #0a1128; color: #fff; }
   border-radius: var(--radius);
   padding: 12px;
   position: relative;
-  padding-right: 72px; /* espaço pros botões no canto */
+  padding-right: 72px;
 }
 .recipe-item h4 { margin: .2rem 0; font-size: 1.05rem; }
 
-/* suportar nomes usados pelo JS e os desta folha */
+/* tags */
 .recipe-tags, .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .recipe-tag, .tag {
   display: inline-block;
@@ -272,43 +263,42 @@ button.dark    { background: #0a1128; color: #fff; }
   position: absolute;
   top: 10px;
   right: 10px;
-  display: flex;
-  gap: 8px;
+  display: flex; gap: 8px;
 }
-
 .icon-btn {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--tap);
-  height: var(--tap);
-  padding: 0 !important;                 /* evita herdar o padding global */
+  align-items: center; justify-content: center;
+  width: var(--tap); height: var(--tap);
+  padding: 0 !important;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,.08);
-  background: #0b1330;
-  color: #cfe0ff;
+  background: #0b1330; color: #cfe0ff;
   cursor: pointer;
-  transition: transform .15s ease, box-shadow .15s ease, background .15s ease, opacity .15s ease;
+  transition: transform .15s, box-shadow .15s, background .15s, opacity .15s;
 }
+.icon-btn.primary { background: var(--success); color: #04120a; }
 .icon-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(79,124,255,.25); }
 .icon-btn.dark  { background: #0a1128; color: #fff; }
 .icon-btn.ghost { background: #12204a; color: #cfe0ff; }
 
-/* Suporte a <img> ou <span class="icon"> */
 .icon-btn .icon,
 .icon-btn > img {
-  width: var(--icon);
-  height: var(--icon);
-  min-width: var(--icon);
-  min-height: var(--icon);
+  width: var(--icon); height: var(--icon);
+  min-width: var(--icon); min-height: var(--icon);
   flex: 0 0 var(--icon);
   display: block;
-  pointer-events: none; /* clique pega o botão inteiro */
+  pointer-events: none;
 }
 
 /* ===== Ícones via CSS mask com arquivos em ./Assets/ ===== */
 .icon-btn .icon { background: currentColor; }
 
+/* play (executar) */
+.icon-play{
+  background: currentColor;
+  -webkit-mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+}
 /* lápis (editar) */
 .icon-edit{
   -webkit-mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
@@ -325,10 +315,8 @@ button.dark    { background: #0a1128; color: #fff; }
 /* =========================== */
 .ingredients {
   list-style: none;
-  margin: 10px 0 0;
-  padding: 0;
-  display: grid;
-  gap: 8px;
+  margin: 10px 0 0; padding: 0;
+  display: grid; gap: 8px;
 }
 .ingredient-line {
   display: grid;
@@ -343,17 +331,13 @@ button.dark    { background: #0a1128; color: #fff; }
 .ingredient-name { font-weight: 700; }
 .qty { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* Badges por frasco seguem existindo para a aba Robô */
+/* Badges de frasco (usadas na aba Robô e nos cards) */
 .reservoir-badge {
   display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: .9rem;
-  font-weight: 700;
-  border-radius: 999px;
-  padding: 4px 10px;
-  border: 1px solid transparent;
-  white-space: nowrap;
+  align-items: center; gap: 6px;
+  font-size: .9rem; font-weight: 700;
+  border-radius: 999px; padding: 4px 10px;
+  border: 1px solid transparent; white-space: nowrap;
 }
 .reservoir-badge.r1 { background: rgba(79,124,255,.12);  color: #cfe0ff; border-color: rgba(79,124,255,.25); }
 .reservoir-badge.r2 { background: rgba(34,197,94,.12);   color: #bbf7d0; border-color: rgba(34,197,94,.25); }
@@ -363,6 +347,29 @@ button.dark    { background: #0a1128; color: #fff; }
 @media (max-width: 520px) {
   .reservoir-badge .full { display: none; }
   .reservoir-badge .short { display: inline; }
+}
+
+/* ===================== */
+/* Robô: grelha          */
+/* ===================== */
+.robot-grid-header {
+  display: grid;
+  grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
+  gap: 8px;
+  margin: .4rem 0;
+}
+.robot-grid-header div{
+  font-size: .9rem; color:#e6ebff; background:#1a2870;
+  padding:8px; border-radius:10px; text-align:center;
+}
+.robot-row {
+  display: grid;
+  grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
+  gap: 8px; align-items: center;
+}
+@media (max-width: 720px){
+  .robot-grid-header{ display:none; }
+  .robot-row{ grid-template-columns: 1fr; }
 }
 
 /* ===================== */
@@ -381,7 +388,7 @@ pre {
 }
 
 /* ===================== */
-/* Dialogs (login/cadastro) */
+/* Dialogs               */
 /* ===================== */
 dialog {
   border: 1px solid rgba(255,255,255,.12);
@@ -395,7 +402,6 @@ dialog::backdrop {
   background: rgba(0,0,0,.5);
   backdrop-filter: blur(2px);
 }
-dialog .card { margin: 0; }
 
 /* ===================== */
 /* Toast                 */
@@ -423,11 +429,30 @@ dialog .card { margin: 0; }
 /* ===================== */
 :focus-visible { outline: none; box-shadow: var(--ring); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
-noscript {
-  display: block;
-  padding: 12px;
-  color: #fff;
-  background: var(--danger);
-  text-align: center;
-  margin-top: 12px;
+
+/* Botões com ícone (texto + pictograma) */
+button.with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+button.with-icon .icon {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  min-height: 18px;
+  display: inline-block;
+  background: currentColor;
+}
+
+/* Novos ícones globais (fora de .icon-btn) */
+.icon-login{
+  background: currentColor;
+  -webkit-mask: url("./Assets/login-2-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/login-2-svgrepo-com.svg") no-repeat center / contain;
+}
+.icon-config{
+  background: currentColor;
+  -webkit-mask: url("./Assets/config-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/config-svgrepo-com.svg") no-repeat center / contain;
 }

@@ -36,12 +36,9 @@ async function jfetch(url, opts = {}) {
 class App {
   constructor() {
     this.state = { isEditing: false, editId: null, roboLoaded: false };
-    this.user = null; // {id, nome} quando logado
-
-    // cache/config do robô
-    this.robotCfg = [];           // array bruto do backend
-    this.robotCfgIndex = {};      // { rotuloLower: [ {frasco, rotulo, g_por_seg} ] }
-    this.robotCfgLoaded = false;
+    this.user = null;               // {id, nome} quando logado
+    this.robotCfg = [];             // itens do GET /config/robo
+    this.robotCfgIndex = {};        // índice por rótulo (lowercase)
 
     this.els = {
       // abas e panes
@@ -66,7 +63,7 @@ class App {
       editNome: document.getElementById('editNome'),
       editId: document.getElementById('editId'),
 
-      // consulta (por nome com autocomplete)
+      // consulta
       buscaNome: document.getElementById('q'),
       listaSugestoes: document.getElementById('listaSugestoes'),
       btnBuscar: document.getElementById('btnBuscar'),
@@ -88,6 +85,7 @@ class App {
       dlgExcluir: document.getElementById('dlgExcluir'),
       toast: document.getElementById('toast'),
       headerRow: document.querySelector('.header-row'),
+      headerTop: document.querySelector('.header-top'),
     };
 
     // timers / abort
@@ -95,8 +93,9 @@ class App {
     this._suggestAbort = null;
     this._searchAbort = null;
 
-    // auth modal
+    // dialogs
     this.authDlg = null;
+    this.runDlg = null;
 
     this.init();
   }
@@ -105,21 +104,20 @@ class App {
   async init() {
     this.ensureAuthBox();
     this.bindEvents();
-    await this.refreshAuth(); // tenta descobrir sessão atual
-    if (this.user) { await this.loadRobotConfig(); } // já deixa mapeamento pronto
-    this.renderIngredientRow(); // primeira linha vazia
+    await this.refreshAuth();                 // tenta descobrir sessão atual
+    if (this.user) { await this.loadRobotConfig(); } // já deixa em cache
+    this.renderIngredientRow();               // primeira linha vazia
     this.selectTab('consultar');
     this.handleListAll();
   }
 
   // ========= AUTH UI =========
-  // Reaproveita uma .auth-box existente (se houver) ou cria uma nova
   ensureAuthBox() {
     this.els.authBox = document.querySelector('.auth-box') || this.els.authBox;
     if (!this.els.authBox) {
       const box = document.createElement('div');
       box.className = 'auth-box';
-      this.els.headerRow?.appendChild(box);
+      (this.els.headerTop || this.els.headerRow)?.appendChild(box);
       this.els.authBox = box;
     }
     this.renderAuthBox();
@@ -135,23 +133,24 @@ class App {
       hello.className = 'lead';
 
       const btnOut = document.createElement('button');
-      btnOut.className = 'ghost';
+      btnOut.className = 'ghost with-icon';
       btnOut.type = 'button';
-      btnOut.textContent = 'Sair';
+      // usa o mesmo ícone “login”, espelhado para sugerir “sair”
+      btnOut.innerHTML = '<span class="icon icon-login" aria-hidden="true" style="transform: scaleX(-1)"></span><span>Sair</span>';
       btnOut.addEventListener('click', () => this.logout());
 
       this.els.authBox.append(hello, btnOut);
     } else {
       const btnIn = document.createElement('button');
-      btnIn.className = 'ghost';
+      btnIn.className = 'ghost with-icon';
       btnIn.type = 'button';
-      btnIn.textContent = 'Entrar';
+      btnIn.innerHTML = '<span class="icon icon-login" aria-hidden="true"></span><span>Entrar</span>';
       btnIn.addEventListener('click', () => this.openAuthDialog('login'));
 
       const btnUp = document.createElement('button');
-      btnUp.className = 'dark';
+      btnUp.className = 'dark with-icon';
       btnUp.type = 'button';
-      btnUp.textContent = 'Criar conta';
+      btnUp.innerHTML = '<span class="icon icon-login" aria-hidden="true"></span><span>Criar conta</span>';
       btnUp.addEventListener('click', () => this.openAuthDialog('register'));
 
       this.els.authBox.append(btnIn, btnUp);
@@ -231,7 +230,7 @@ class App {
       // Cancelar
       dlg.querySelector('#authCancel').addEventListener('click', () => dlg.close('cancel'));
 
-      // Enter nas inputs = confirmar
+      // Enter = confirmar
       dlg.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') {
           ev.preventDefault();
@@ -253,9 +252,6 @@ class App {
   async logout() {
     try { await jfetch(`${API_URL}/auth/logout`, { method: 'POST' }); } catch {}
     this.user = null;
-    this.robotCfg = [];
-    this.robotCfgIndex = {};
-    this.robotCfgLoaded = false;
     this.renderAuthBox();
     this.toast('Sessão encerrada.', 'ok');
     this.handleListAll();
@@ -298,9 +294,11 @@ class App {
     });
 
     // Robô
-    this.els.btnSalvarRobo.addEventListener('click', () => {
+    this.els.btnSalvarRobo.addEventListener('click', async () => {
       if (!this.ensureAuthOrPrompt()) return;
-      this.saveRobotConfig();
+      await this.saveRobotConfig();
+      await this.loadRobotConfig(true); // recarrega índice
+      this.handleListAll();             // atualiza badges nos cards
     });
     this.els.btnRecarregarRobo.addEventListener('click', () => {
       if (!this.ensureAuthOrPrompt()) return;
@@ -602,7 +600,7 @@ class App {
     }
   }
 
-  // ================== Consulta / Autocomplete ao digitar ==================
+  // ================== Consulta / Autocomplete ==================
   handleLiveInputDebounced() {
     clearTimeout(this._typeTimer);
     this._typeTimer = setTimeout(() => this.handleLiveInput(), TYPING_DEBOUNCE_MS);
@@ -694,19 +692,21 @@ class App {
     }
   }
 
-  // ---------- helpers mapeamento ----------
+  // ---------- Mapeamento dinâmico (rótulo -> frasco preferido) ----------
   _indexRobotCfg(items) {
     const idx = {};
-    for (const it of (items || [])) {
-      const key = (it.rotulo || '').trim().toLowerCase();
-      if (!key) continue;
+    for (const it of items || []) {
+      if (!it?.rotulo) continue;
+      const key = String(it.rotulo).trim().toLowerCase();
       if (!idx[key]) idx[key] = [];
-      idx[key].push({ frasco: it.frasco, rotulo: it.rotulo, g_por_seg: it.g_por_seg ?? null });
-      // ordenar: com g/s primeiro; menor frasco primeiro
+      idx[key].push(it);
+    }
+    // ordena: preferir quem tem g/s definido; empate por frasco asc
+    for (const key of Object.keys(idx)) {
       idx[key].sort((a, b) => {
-        const ag = a.g_por_seg != null ? 1 : 0;
-        const bg = b.g_por_seg != null ? 1 : 0;
-        if (ag !== bg) return bg - ag;
+        const ag = Number.isFinite(a.g_por_seg) ? a.g_por_seg : -1;
+        const bg = Number.isFinite(b.g_por_seg) ? b.g_por_seg : -1;
+        if (ag !== bg) return bg - ag; // quem tem g/s primeiro
         return a.frasco - b.frasco;
       });
     }
@@ -714,30 +714,42 @@ class App {
   }
 
   resolveReservoirFor(tempero) {
-    const key = (tempero || '').trim().toLowerCase();
-    const arr = this.robotCfgIndex[key];
-    if (!arr || arr.length === 0) return null;
-    return arr[0]; // melhor candidato (ver _indexRobotCfg)
+    if (!tempero) return null;
+    const key = String(tempero).trim().toLowerCase();
+    const arr = this.robotCfgIndex[key] || [];
+    if (!arr.length) return null;
+    const cfg = arr[0];
+    const gps = Number.isFinite(cfg.g_por_seg) ? Number(cfg.g_por_seg) : null;
+    return { frasco: cfg.frasco, gps };
   }
 
   resolveMapping(ingredientes) {
-    const missingMap = [];
-    const missingCal = [];
     const mapped = [];
+    const missingMap = new Set();
+    const missingCal = new Set();
 
-    for (const ing of (ingredientes || [])) {
-      const m = this.resolveReservoirFor(ing.tempero);
-      if (!m) {
-        missingMap.push(ing.tempero);
+    for (const ing of ingredientes || []) {
+      const match = this.resolveReservoirFor(ing.tempero);
+      if (!match) {
+        missingMap.add(ing.tempero);
         continue;
       }
-      if (m.g_por_seg == null || m.g_por_seg <= 0) {
-        missingCal.push(ing.tempero);
+      if (!match.gps || match.gps <= 0) {
+        missingCal.add(ing.tempero);
+        continue;
       }
-      mapped.push({ ...m, quantidade: ing.quantidade, tempero: ing.tempero });
+      mapped.push({
+        tempero: ing.tempero,
+        quantidade: ing.quantidade,
+        frasco: match.frasco,
+        gps: match.gps,
+      });
     }
-
-    return { mapped, missingMap, missingCal };
+    return {
+      mapped,
+      missingMap: Array.from(missingMap),
+      missingCal: Array.from(missingCal),
+    };
   }
 
   // ---------- helpers de UI do card ----------
@@ -745,17 +757,16 @@ class App {
     const li = document.createElement('li');
     li.className = 'ingredient-line';
 
-    const badgeWrap = document.createElement('span');
-    const mapping = this.resolveReservoirFor(ing.tempero);
-    if (mapping) {
-      // mostra Rn (rótulo)
+    // tenta resolver frasco pra mostrar badge
+    const resolved = this.resolveReservoirFor(ing.tempero);
+    if (resolved?.frasco) {
       const badge = document.createElement('span');
-      badge.className = `reservoir-badge r${mapping.frasco}`;
+      badge.className = `reservoir-badge r${resolved.frasco}`;
       badge.innerHTML = `
-        <span class="full">R${mapping.frasco} (${mapping.rotulo || ing.tempero})</span>
-        <span class="short">R${mapping.frasco}</span>
+        <span class="full">Reservatório ${resolved.frasco}</span>
+        <span class="short">R${resolved.frasco}</span>
       `;
-      badgeWrap.appendChild(badge);
+      li.appendChild(badge);
     }
 
     const name = document.createElement('span');
@@ -766,7 +777,7 @@ class App {
     qty.className = 'qty';
     qty.textContent = `${ing.quantidade} g`;
 
-    li.append(badgeWrap, name, qty);
+    li.append(name, qty);
     return li;
   }
 
@@ -896,19 +907,11 @@ class App {
       this.robotCfgIndex = this._indexRobotCfg(this.robotCfg);
       this._fillRobotFields(this.robotCfg);
       this.state.roboLoaded = true;
-      this.robotCfgLoaded = true;
       if (forceToast) this.toast('Configuração carregada.', 'ok');
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message || 'Falha ao carregar configuração', 'err');
     }
-  }
-
-  async ensureRobotConfig() {
-    if (!this.user) return false;
-    if (this.robotCfgLoaded) return true;
-    await this.loadRobotConfig();
-    return this.robotCfgLoaded;
   }
 
   async saveRobotConfig() {
@@ -920,43 +923,142 @@ class App {
       });
       this.toast('Configuração salva!', 'ok');
       this.state.roboLoaded = false; // força recarga futura
-      // atualiza índices locais
-      this.robotCfg = payload;
-      this.robotCfgIndex = this._indexRobotCfg(this.robotCfg);
-      this.robotCfgLoaded = true;
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e.message || 'Falha ao salvar configuração', 'err');
     }
   }
 
-  // ================== Play: pré-checagem + enviar job ==================
+  // ================== Play com multiplicador ==================
+  _ensureRobotLoaded = async () => {
+    if (!this.state.roboLoaded) { await this.loadRobotConfig(); }
+  };
+
+  _openRunDialog(recipe, mapping) {
+    if (!this.runDlg) {
+      const dlg = document.createElement('dialog');
+      dlg.id = 'dlgRun';
+      dlg.innerHTML = `
+        <form method="dialog" style="min-width: 320px">
+          <h3 id="runTitle" style="margin:0 0 8px">Executar</h3>
+
+          <label for="runMult">Multiplicador</label>
+          <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px">
+            <input id="runMult" type="number" min="1" max="99" step="1" value="1" inputmode="numeric" />
+            <button type="button" class="ghost" data-quick="1">1×</button>
+            <button type="button" class="ghost" data-quick="2">2×</button>
+            <button type="button" class="ghost" data-quick="3">3×</button>
+          </div>
+
+          <details style="margin-top:10px">
+            <summary>Prévia dos tempos</summary>
+            <ul id="runPreview" class="ingredients" style="margin-top:8px"></ul>
+          </details>
+
+          <div class="actions" style="grid-template-columns: 1fr 1fr; margin-top: 12px">
+            <button id="runCancel" type="button" class="ghost">Cancelar</button>
+            <button id="runConfirm" class="primary" type="button">Executar</button>
+          </div>
+          <p class="hint" id="runHint" style="margin-top:6px"></p>
+        </form>`;
+      document.body.appendChild(dlg);
+      this.runDlg = dlg;
+
+      // binds estáticos
+      dlg.querySelector('#runCancel').addEventListener('click', () => dlg.close('cancel'));
+      // quick buttons
+      dlg.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-quick]');
+        if (!btn) return;
+        ev.preventDefault();
+        const mult = Number(btn.dataset.quick);
+        const input = dlg.querySelector('#runMult');
+        input.value = String(mult);
+        this._renderRunPreview();
+      });
+      // alterações do multiplicador
+      dlg.querySelector('#runMult').addEventListener('input', () => this._renderRunPreview());
+    }
+
+    // salva contexto atual pra preview/execução
+    this._runCtx = { recipe, mapping };
+    this.runDlg.querySelector('#runTitle').textContent = `Executar: ${recipe.nome}`;
+    this.runDlg.querySelector('#runHint').textContent = '';
+
+    // (re)bind confirmar a cada abertura
+    const confirmBtn = this.runDlg.querySelector('#runConfirm');
+    confirmBtn.replaceWith(confirmBtn.cloneNode(true)); // remove listeners antigos
+    const newConfirm = this.runDlg.querySelector('#runConfirm');
+    newConfirm.addEventListener('click', async () => {
+      const mult = Math.max(1, Math.min(99, Number(this.runDlg.querySelector('#runMult').value || 1)));
+      try {
+        newConfirm.disabled = true;
+        const data = await jfetch(`${API_URL}/jobs`, {
+          method: 'POST',
+          body: JSON.stringify({ receita_id: recipe.id, multiplicador: mult }),
+        });
+        this.toast(data?.detail || 'Receita enviada ao robô!', 'ok');
+        this.runDlg.close('ok');
+      } catch (e) {
+        const msg = e?.data?.detail || e.message || 'Falha ao iniciar execução';
+        this.runDlg.querySelector('#runHint').textContent = msg;
+        this.toast(msg, 'err');
+      } finally {
+        newConfirm.disabled = false;
+      }
+    });
+
+    // renderiza preview e abre
+    this._renderRunPreview();
+    this.runDlg.showModal();
+  }
+
+  _renderRunPreview() {
+    const ctx = this._runCtx;
+    if (!ctx) return;
+    const mult = Math.max(1, Math.min(99, Number(this.runDlg.querySelector('#runMult').value || 1)));
+    const ul = this.runDlg.querySelector('#runPreview');
+    ul.innerHTML = '';
+
+    for (const it of ctx.mapping.mapped) {
+      const total = it.quantidade * mult;
+      const secs = it.gps > 0 ? Math.round((total / it.gps) * 1000) / 1000 : 0;
+      const li = document.createElement('li');
+      li.className = 'ingredient-line';
+      const badge = document.createElement('span');
+      badge.className = `reservoir-badge r${it.frasco}`;
+      badge.innerHTML = `<span class="short">R${it.frasco}</span><span class="full">Reservatório ${it.frasco}</span>`;
+      const name = document.createElement('span');
+      name.className = 'ingredient-name';
+      name.textContent = it.tempero;
+      const qty = document.createElement('span');
+      qty.className = 'qty';
+      qty.textContent = `${it.quantidade} g × ${mult} = ${total} g • ${secs}s`;
+      li.append(badge, name, qty);
+      ul.appendChild(li);
+    }
+  }
+
   async runRecipe(id, btnEl) {
     try {
       if (btnEl) btnEl.disabled = true;
 
-      // 1) garantir config do robô carregada
-      await this.ensureRobotConfig();
-
-      // 2) obter receita (para checagem local)
+      await this._ensureRobotLoaded();
       const recipe = await jfetch(`${API_URL}/receitas/${id}`);
-      const pre = this.resolveMapping(recipe.ingredientes || []);
 
-      if (pre.missingMap.length > 0) {
-        this.toast(`Mapeamento ausente: defina os frascos para ${pre.missingMap.join(', ')} na aba Robô.`, 'err');
+      // valida mapeamento no cliente para UX
+      const mapping = this.resolveMapping(recipe.ingredientes || []);
+      if (mapping.missingMap?.length) {
+        this.toast(`Mapeamento ausente: ${mapping.missingMap.join(', ')}. Defina na aba Robô.`, 'err');
         return;
       }
-      if (pre.missingCal.length > 0) {
-        this.toast(`Calibração pendente (g/s) para: ${pre.missingCal.join(', ')}. Preencha na aba Robô.`, 'err');
+      if (mapping.missingCal?.length) {
+        this.toast(`Calibração pendente (g/s) para: ${mapping.missingCal.join(', ')}. Aba Robô.`, 'err');
         return;
       }
 
-      // 3) tudo ok → enviar job
-      const data = await jfetch(`${API_URL}/jobs`, {
-        method: 'POST',
-        body: JSON.stringify({ receita_id: id, multiplicador: 1 }),
-      });
-      this.toast(data?.detail || 'Receita enviada ao robô!', 'ok');
+      // abre diálogo com multiplicador + preview
+      this._openRunDialog(recipe, mapping);
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
       const msg = e?.data?.detail || e.message || 'Falha ao iniciar execução';
