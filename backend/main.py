@@ -898,3 +898,66 @@ def device_job_status(
 
     db.commit()
     return {"ok": True}
+
+# ---------------------------------------------------------------------
+# Utilitários: devices do usuário e controle do job ativo
+# ---------------------------------------------------------------------
+from typing import Dict
+
+def _is_online(dev: models.Device) -> bool:
+    if not dev.last_seen:
+        return False
+    return (datetime.now(timezone.utc) - dev.last_seen) <= timedelta(seconds=90)
+
+@app.get("/me/devices")
+def my_devices(
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(models.Device).filter(models.Device.user_id == current.id).all()
+    out: List[Dict] = []
+    for d in rows:
+        out.append({
+            "id": d.id,
+            "uid": d.uid,
+            "fw_version": d.fw_version,
+            "last_seen": d.last_seen,
+            "online": _is_online(d),
+        })
+    return {"devices": out, "online_any": any(x["online"] for x in out)}
+
+@app.get("/jobs/active")
+def jobs_active(
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = (
+        db.query(models.Job)
+        .filter(models.Job.user_id == current.id, models.Job.status.in_(("queued", "running")))
+        .order_by(models.Job.id.asc())
+        .first()
+    )
+    if not job:
+        return {"active": None}
+    return {"active": {"id": job.id, "status": job.status, "started_at": job.started_at}}
+
+@app.post("/jobs/active/cancel")
+def cancel_active_job(
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    jobs = (
+        db.query(models.Job)
+        .filter(models.Job.user_id == current.id, models.Job.status.in_(("queued", "running")))
+        .all()
+    )
+    now = datetime.now(timezone.utc)
+    count = 0
+    for j in jobs:
+        j.status = "failed"
+        j.finished_at = now
+        j.erro_msg = "cancelado pelo usuário"
+        count += 1
+    db.commit()
+    return {"ok": True, "cancelled": count}
+

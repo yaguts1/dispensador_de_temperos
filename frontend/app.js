@@ -1028,10 +1028,21 @@ class App {
     const confirmBtn = this.runDlg.querySelector('#runConfirm');
     confirmBtn.replaceWith(confirmBtn.cloneNode(true));
     const newConfirm = this.runDlg.querySelector('#runConfirm');
+
     newConfirm.addEventListener('click', async () => {
       const mult = Math.max(1, Math.min(99, Number(this.runDlg.querySelector('#runMult').value || 1)));
+      const hint = this.runDlg.querySelector('#runHint');
+
       try {
         newConfirm.disabled = true;
+
+        // opcional: checa se existe robô online
+        const online = await this._checkRobotOnline();
+        if (!online) {
+          hint.textContent = 'Nenhum robô online agora. Verifique se o ESP está ligado e vinculado.';
+          return;
+        }
+
         const data = await jfetch(`${API_URL}/jobs`, {
           method: 'POST',
           body: JSON.stringify({ receita_id: recipe.id, multiplicador: mult }),
@@ -1040,8 +1051,26 @@ class App {
         this.runDlg.close('ok');
       } catch (e) {
         const msg = e?.data?.detail || e.message || 'Falha ao iniciar execução';
-        this.runDlg.querySelector('#runHint').textContent = msg;
-        this.toast(msg, 'err');
+        // se bateu no bloqueio 409, mostra CTA para cancelar o job travado
+        if (e.status === 409 && /Robô ocupado/i.test(msg)) {
+          hint.innerHTML = `${msg} <button id="btnCancelActive" class="ghost" type="button">Cancelar execução atual</button>`;
+          const btnCancel = this.runDlg.querySelector('#btnCancelActive');
+          btnCancel?.addEventListener('click', async () => {
+            try {
+              btnCancel.disabled = true;
+              await jfetch(`${API_URL}/jobs/active/cancel`, { method: 'POST' });
+              this.toast('Execução atual cancelada. Você pode tentar novamente.', 'ok');
+              hint.textContent = 'Execução anterior cancelada. Clique em "Executar" de novo.';
+            } catch (e2) {
+              this.toast(e2?.data?.detail || e2.message || 'Falha ao cancelar', 'err');
+            } finally {
+              btnCancel.disabled = false;
+            }
+          });
+        } else {
+          hint.textContent = msg;
+          this.toast(msg, 'err');
+        }
       } finally {
         newConfirm.disabled = false;
       }
@@ -1050,6 +1079,18 @@ class App {
     this._renderRunPreview();
     this.runDlg.showModal();
   }
+
+  /** Retorna true se houver pelo menos um device online do usuário (últimos 90s) */
+  async _checkRobotOnline() {
+    try {
+      const r = await jfetch(`${API_URL}/me/devices`);
+      return !!r?.online_any;
+    } catch {
+      // se a API cair, não vamos bloquear a tentativa
+      return true;
+    }
+  }
+
 
   _renderRunPreview() {
     const ctx = this._runCtx;
