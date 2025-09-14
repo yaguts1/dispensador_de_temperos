@@ -54,12 +54,37 @@ DEFAULT_TEMPEROS = [
     "Cominho",
 ]
 
+# ---------------------------------------------------------------------
+# Utilidades de data/hora (UTC consistente)
+# ---------------------------------------------------------------------
+def now_utc() -> datetime:
+    return datetime.now(timezone.utc)
 
+def _ensure_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normaliza datetimes: se vier naive, assume UTC; se vier com tz, converte para UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+def iso_utc(dt: Optional[datetime]) -> Optional[str]:
+    d = _ensure_aware_utc(dt)
+    return d.isoformat().replace("+00:00", "Z") if d else None
+
+@app.get("/time")
+def server_time():
+    """Hora do servidor em UTC para o front calcular localmente."""
+    return {"utc": iso_utc(now_utc())}
+
+# ---------------------------------------------------------------------
+# JWT helpers
+# ---------------------------------------------------------------------
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    now = datetime.now(timezone.utc)
-    expire = now + (expires_delta or timedelta(minutes=ACCESS_TOKEN_MINUTES))
-    to_encode.update({"iat": int(now.timestamp()), "exp": int(expire.timestamp())})
+    n = now_utc()
+    expire = n + (expires_delta or timedelta(minutes=ACCESS_TOKEN_MINUTES))
+    to_encode.update({"iat": int(n.timestamp()), "exp": int(expire.timestamp())})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -257,7 +282,7 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
         except Exception:
             raise HTTPException(status_code=400, detail=f"Quantidade inválida para '{(ing.tempero or '').strip()}'. Use um inteiro 1–500 g.")
         if q < 1 or q > 500:
-            raise HTTPException(status_code=400, detail=f"A quantidade de '{(ing.tempero or '').strip()}' deve ter até 60 caracteres.")
+            raise HTTPException(status_code=400, detail=f"A quantidade de '{(ing.tempero or '').strip()}' deve ser um inteiro entre 1 e 500 g.")
         ing.quantidade = q
 
         nome = (ing.tempero or "").strip()
@@ -762,7 +787,7 @@ def create_device_claim(
     db: Session = Depends(get_db),
 ):
     # gera código 6 dígitos, expira em 10 minutos
-    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    expires = now_utc() + timedelta(minutes=10)
     while True:
         code = f"{randint(0, 999999):06d}"
         exists = db.query(models.DeviceClaim).filter(models.DeviceClaim.code == code).first()
@@ -776,7 +801,7 @@ def create_device_claim(
 
 @app.post("/devices/claim")
 def device_claim(payload: schemas.DeviceClaimIn, db: Session = Depends(get_db)):
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     claim = (
         db.query(models.DeviceClaim)
         .filter(
@@ -814,7 +839,7 @@ def device_heartbeat(
     dev: models.Device = Depends(get_current_device),
     db: Session = Depends(get_db),
 ):
-    dev.last_seen = datetime.now(timezone.utc)
+    dev.last_seen = now_utc()                            # <<< mantém online atualizado
     if data.fw_version:
         dev.fw_version = data.fw_version
     if data.status is not None:
@@ -828,6 +853,7 @@ def device_next_job(
     dev: models.Device = Depends(get_current_device),
     db: Session = Depends(get_db),
 ):
+    dev.last_seen = now_utc()                            # <<< também atualiza aqui
     job = (
         db.query(models.Job)
         .options(selectinload(models.Job.itens), selectinload(models.Job.receita))
@@ -837,10 +863,11 @@ def device_next_job(
         .first()
     )
     if not job:
+        db.commit()
         return Response(status_code=204)
 
     job.status = "running"
-    job.started_at = datetime.now(timezone.utc)
+    job.started_at = now_utc()
     db.commit()
     db.refresh(job)
     return job
@@ -853,6 +880,7 @@ def device_job_status(
     dev: models.Device = Depends(get_current_device),
     db: Session = Depends(get_db),
 ):
+    dev.last_seen = now_utc()                            # <<< e aqui
     job = (
         db.query(models.Job)
         .options(selectinload(models.Job.itens), selectinload(models.Job.receita))
@@ -867,7 +895,7 @@ def device_job_status(
     if dono_id != dev.user_id:
         raise HTTPException(status_code=403, detail="Job não pertence a este usuário/dispositivo.")
 
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     if payload.status == "running":
         job.status = "running"
         if not job.started_at:
@@ -902,23 +930,11 @@ def device_job_status(
 # ---------------------------------------------------------------------
 # Utilitários: devices do usuário e controle do job ativo
 # ---------------------------------------------------------------------
-
-def _ensure_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
-    """Normaliza datetimes: se vier naive, assume UTC; se vier com tz, converte para UTC."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
 def _is_online(dev: models.Device) -> bool:
     last = _ensure_aware_utc(dev.last_seen)
-    if not last:
-        return False
     try:
-        return (datetime.now(timezone.utc) - last) <= timedelta(seconds=90)
+        return bool(last and (now_utc() - last) <= timedelta(seconds=90))
     except Exception:
-        # Nunca derrube o endpoint por dados ruins
         return False
 
 def _list_user_devices(db: Session, user_id: int):
@@ -929,7 +945,7 @@ def _list_user_devices(db: Session, user_id: int):
             "id": d.id,
             "uid": d.uid,
             "fw_version": d.fw_version,
-            "last_seen": _ensure_aware_utc(d.last_seen),
+            "last_seen": iso_utc(d.last_seen),     # <<< ISO-8601 UTC com 'Z'
             "online": _is_online(d),
         })
     return {"devices": out, "online_any": any(x["online"] for x in out)}
@@ -962,7 +978,7 @@ def jobs_active(
     )
     if not job:
         return {"active": None}
-    return {"active": {"id": job.id, "status": job.status, "started_at": job.started_at}}
+    return {"active": {"id": job.id, "status": job.status, "started_at": iso_utc(job.started_at)}}
 
 @app.post("/jobs/active/cancel")
 def cancel_active_job(
@@ -974,7 +990,7 @@ def cancel_active_job(
         .filter(models.Job.user_id == current.id, models.Job.status.in_(("queued", "running")))
         .all()
     )
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     count = 0
     for j in jobs:
         j.status = "failed"
