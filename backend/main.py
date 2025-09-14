@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 from passlib.hash import bcrypt
-from typing import Optional, List, Iterable, Tuple
+from typing import Optional, List, Iterable, Tuple, Dict
 from starlette import status
 from sqlalchemy import func
 from jose import jwt, JWTError
@@ -45,7 +45,7 @@ COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", ".yaguts.com.br")  # para dev local, 
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "1") == "1"        # produção: 1, dev: 0
 COOKIE_SAMESITE = "Lax"  # subdomínios são "same-site", Lax funciona bem
 
-# Catálogo base (padrão) — pode expandir aqui
+# Catálogo base (padrão)
 DEFAULT_TEMPEROS = [
     "Pimenta",
     "Sal",
@@ -257,7 +257,7 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
         except Exception:
             raise HTTPException(status_code=400, detail=f"Quantidade inválida para '{(ing.tempero or '').strip()}'. Use um inteiro 1–500 g.")
         if q < 1 or q > 500:
-            raise HTTPException(status_code=400, detail=f"A quantidade de '{(ing.tempero or '').strip()}' deve ser um inteiro entre 1 e 500 g.")
+            raise HTTPException(status_code=400, detail=f"A quantidade de '{(ing.tempero or '').strip()}' deve ter até 60 caracteres.")
         ing.quantidade = q
 
         nome = (ing.tempero or "").strip()
@@ -697,7 +697,7 @@ def criar_job(
                 detail=f"Estoque insuficiente no Reservatório {frasco}: precisa {consumo} g, tem {cfg.estoque_g} g",
             )
 
-    # cria job + itens (NÃO ABAte estoque aqui!)
+    # cria job + itens (NÃO abate estoque aqui!)
     job = models.Job(
         user_id=current.id,
         receita_id=receita.id,
@@ -902,29 +902,52 @@ def device_job_status(
 # ---------------------------------------------------------------------
 # Utilitários: devices do usuário e controle do job ativo
 # ---------------------------------------------------------------------
-from typing import Dict
+
+def _ensure_aware_utc(dt: Optional[datetime]) -> Optional[datetime]:
+    """Normaliza datetimes: se vier naive, assume UTC; se vier com tz, converte para UTC."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 def _is_online(dev: models.Device) -> bool:
-    if not dev.last_seen:
+    last = _ensure_aware_utc(dev.last_seen)
+    if not last:
         return False
-    return (datetime.now(timezone.utc) - dev.last_seen) <= timedelta(seconds=90)
+    try:
+        return (datetime.now(timezone.utc) - last) <= timedelta(seconds=90)
+    except Exception:
+        # Nunca derrube o endpoint por dados ruins
+        return False
 
-@app.get("/me/devices")
-def my_devices(
-    current: models.Usuario = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    rows = db.query(models.Device).filter(models.Device.user_id == current.id).all()
+def _list_user_devices(db: Session, user_id: int):
+    rows = db.query(models.Device).filter(models.Device.user_id == user_id).all()
     out: List[Dict] = []
     for d in rows:
         out.append({
             "id": d.id,
             "uid": d.uid,
             "fw_version": d.fw_version,
-            "last_seen": d.last_seen,
+            "last_seen": _ensure_aware_utc(d.last_seen),
             "online": _is_online(d),
         })
     return {"devices": out, "online_any": any(x["online"] for x in out)}
+
+@app.get("/me/devices")
+def my_devices(
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _list_user_devices(db, current.id)
+
+# Alias para compatibilidade: alguns front-ends chamam /devices
+@app.get("/devices")
+def devices_alias(
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    return _list_user_devices(db, current.id)
 
 @app.get("/jobs/active")
 def jobs_active(
@@ -960,4 +983,3 @@ def cancel_active_job(
         count += 1
     db.commit()
     return {"ok": True, "cancelled": count}
-

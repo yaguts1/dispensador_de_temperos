@@ -7,14 +7,16 @@
   Correções principais:
     • Cliente TLS/HTTP mantido vivo durante toda a chamada (evita “The plain HTTP request was sent to HTTPS port”).
     • parseApi() robusto: remove paths, ajusta coerência http/https ↔ portas.
-    • Rota /wipe para zerar preferências via portal.
-    • Debug serial mais explícito.
+    • Persistência do token: grava, re-lê e confirma; limpa se backend responder 401.
+    • Parser do claim mais flexível (device_token / token / access_token, inclusive em data.* / result.*), com fallback por string scanning.
+    • /wipe para zerar preferências.
+    • Logs melhores (inclui 204 no poll) + **poll imediato após concluir job**.
 
   Dica: deixe o campo “Servidor da API” como:  api.yaguts.com.br
 */
 
 #include <Arduino.h>
-#include "yaguts_types.h"   // struct ApiEndpoint está aqui
+#include "yaguts_types.h"   // struct ApiEndpoint
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -47,7 +49,8 @@ const unsigned long MAX_STEP_MS = 180000UL;
 
 // ---------- Timings ----------
 unsigned long HEARTBEAT_EVERY_MS = 30000;
-const unsigned long JOB_POLL_MS = 2000;
+// mais responsivo:
+const unsigned long JOB_POLL_MS = 1000;
 
 // ---------- Portal ----------
 WebServer server(80);
@@ -65,6 +68,13 @@ String st_claim;
 enum RunState { ST_CONFIG_PORTAL, ST_WIFI_CONNECT, ST_ONLINE };
 RunState state = ST_WIFI_CONNECT;
 
+// ---------- Relógios de loop ----------
+unsigned long lastHeartbeat = 0;
+unsigned long lastPoll = 0;
+
+// ---- Protótipos necessários ----
+bool connectSTA(unsigned long timeoutMs = 20000);
+
 // ---------- Aux ----------
 String chipUID() {
   uint64_t mac = ESP.getEfuseMac();
@@ -79,16 +89,13 @@ ApiEndpoint parseApi() {
   String raw = st_api.length() ? st_api : String(DEFAULT_API_HOST);
   raw.trim();
 
-  // esquema (padrão = HTTPS)
   bool https = API_HTTPS_DEFAULT;
   if (raw.startsWith("https://")) { https = true; raw = raw.substring(8); }
   else if (raw.startsWith("http://")) { https = false; raw = raw.substring(7); }
 
-  // remove qualquer /path
   int slash = raw.indexOf('/');
   if (slash >= 0) raw = raw.substring(0, slash);
 
-  // host[:port]
   uint16_t port = https ? API_PORT_HTTPS : API_PORT_HTTP;
   String host = raw;
   int col = raw.indexOf(':');
@@ -98,10 +105,10 @@ ApiEndpoint parseApi() {
     if (p > 0) port = (uint16_t)p;
   }
   host.trim();
+  if (!host.length()) host = DEFAULT_API_HOST;
 
-  // coerência porta ↔ protocolo
-  if (!https && port == 443) https = true; // http://...:443 → HTTPS
-  if (https && port == 80)   port = 443;   // https://...:80 → 443
+  if (!https && port == 443) https = true;
+  if (https && port == 80)   port = 443;
 
   return ApiEndpoint{host, port, https};
 }
@@ -111,7 +118,7 @@ String maskToken(const String& tok) {
   return tok.substring(0, 8) + "…" + tok.substring(tok.length()-6);
 }
 
-// ---------- HTTP helpers (cliente mantido vivo) ----------
+// ---------- HTTP helpers ----------
 int httpGET(const String& path, String &out) {
   ApiEndpoint ep = parseApi();
   HTTPClient http;
@@ -121,7 +128,6 @@ int httpGET(const String& path, String &out) {
                 ep.host.c_str(), ep.port, path.c_str());
 #endif
 
-  // mantém os objetos até o fim
   WiFiClientSecure sclient;
   WiFiClient       cclient;
   WiFiClient*      client = nullptr;
@@ -140,6 +146,7 @@ int httpGET(const String& path, String &out) {
   if (!http.begin(*client, ep.host.c_str(), ep.port, path)) { out = ""; return -1; }
 
   http.setUserAgent(String("YagutsESP32/") + FW_VERSION);
+  http.addHeader("Accept", "application/json");
   if (path.startsWith("/devices/me/") && st_token.length()) {
     http.addHeader("Authorization", String("Bearer ") + st_token);
   }
@@ -163,7 +170,6 @@ int httpPOST(const String& path, const String &jsonBody, String &out) {
   Serial.printf("[HTTP POST] Body: %s\n", jsonBody.c_str());
 #endif
 
-  // mantém os objetos até o fim
   WiFiClientSecure sclient;
   WiFiClient       cclient;
   WiFiClient*      client = nullptr;
@@ -174,7 +180,7 @@ int httpPOST(const String& path, const String &jsonBody, String &out) {
   #else
     sclient.setCACert(LE_ISRG_ROOT_X1);
   #endif
-  client = &sclient;
+    client = &sclient;
   } else {
     client = &cclient;
   }
@@ -182,6 +188,7 @@ int httpPOST(const String& path, const String &jsonBody, String &out) {
   if (!http.begin(*client, ep.host.c_str(), ep.port, path)) { out = ""; return -1; }
 
   http.setUserAgent(String("YagutsESP32/") + FW_VERSION);
+  http.addHeader("Accept", "application/json");
   http.addHeader("Content-Type", "application/json");
   if (path.startsWith("/devices/me/") && st_token.length()) {
     http.addHeader("Authorization", String("Bearer ") + st_token);
@@ -319,7 +326,7 @@ void stopPortal() {
 }
 
 // ---------- Wi-Fi ----------
-bool connectSTA(unsigned long timeoutMs = 20000) {
+bool connectSTA(unsigned long timeoutMs) {
   if (!st_ssid.length()) return false;
   WiFi.mode(WIFI_STA);
   WiFi.begin(st_ssid.c_str(), st_pass.c_str());
@@ -338,6 +345,44 @@ bool connectSTA(unsigned long timeoutMs = 20000) {
   return false;
 }
 
+// ---------- helpers de parsing ----------
+static String _json_pick_token(const JsonVariantConst& root) {
+  const char* keys1[] = {"device_token", "token", "access_token"};
+  for (auto k : keys1) {
+    const char* v = root[k] | nullptr;
+    if (v && *v) return String(v);
+  }
+  const char* parents[] = {"data", "result"};
+  for (auto p : parents) {
+    JsonVariantConst sub = root[p];
+    if (!sub.isNull()) {
+      for (auto k : keys1) {
+        const char* v = sub[k] | nullptr;
+        if (v && *v) return String(v);
+      }
+    }
+  }
+  return "";
+}
+
+static String _scan_token_from_body(const String& body) {
+  const char* keys[] = {"\"device_token\"", "\"access_token\"", "\"token\""};
+  for (auto k : keys) {
+    int i = body.indexOf(k);
+    if (i < 0) continue;
+    int c = body.indexOf(':', i);
+    if (c < 0) continue;
+    while (c + 1 < (int)body.length() && (body[c+1] == ' ' || body[c+1] == '\t')) c++;
+    int q1 = body.indexOf('"', c + 1);
+    if (q1 < 0) continue;
+    int q2 = body.indexOf('"', q1 + 1);
+    if (q2 < 0) continue;
+    String tok = body.substring(q1 + 1, q2);
+    if (tok.length() > 10) return tok;
+  }
+  return "";
+}
+
 // ---------- Dispositivo ----------
 bool doClaim() {
   if (!st_claim.length()) {
@@ -354,28 +399,41 @@ bool doClaim() {
   String out;
   int code = httpPOST("/devices/claim", body, out);
   Serial.printf("[CLAIM] HTTP %d\n", code);
-  if (code == 200) {
-    StaticJsonDocument<384> doc;
+  if (code != 200) { Serial.println(out); return false; }
+
+  String tok = "";
+  int hb = 30;
+  {
+    StaticJsonDocument<2048> doc;
     DeserializationError e = deserializeJson(doc, out);
-    if (e) { Serial.println("[CLAIM] JSON invalido."); return false; }
-    const char* tok = doc["device_token"] | nullptr;
-    int hb = doc["heartbeat_sec"] | 30;
-    if (tok) {
-      st_token = String(tok);
-      prefs.begin("yaguts", false);
-      prefs.putString("device_token", st_token);
-      prefs.remove("claim");
-      prefs.end();
-      st_claim = "";
-      HEARTBEAT_EVERY_MS = (unsigned long)hb * 1000UL;
-      Serial.printf("[CLAIM] VINCULO OK. token=%s  heartbeat=%ds\n",
-                    maskToken(st_token).c_str(), hb);
-      return true;
+    if (!e) {
+      tok = _json_pick_token(doc.as<JsonVariantConst>());
+      hb  = doc["heartbeat_sec"] | 30;
     }
-  } else {
-    Serial.println(out);
   }
-  return false;
+  if (!tok.length()) tok = _scan_token_from_body(out);
+
+  if (!tok.length()) {
+    Serial.print("[CLAIM] token ausente. Body: ");
+    if (out.length() > 300) Serial.println(out.substring(0, 300) + "...");
+    else Serial.println(out);
+    return false;
+  }
+
+  prefs.begin("yaguts", false);
+  prefs.putString("device_token", tok);
+  prefs.remove("claim");
+  prefs.end();
+
+  prefs.begin("yaguts", true);
+  st_token = prefs.getString("device_token", "");
+  prefs.end();
+  st_claim = "";
+
+  HEARTBEAT_EVERY_MS = (unsigned long)hb * 1000UL;
+  Serial.printf("[CLAIM] VINCULO OK. token_len=%d heartbeat=%ds\n",
+                st_token.length(), hb);
+  return st_token.length() > 0;
 }
 
 bool sendHeartbeat() {
@@ -388,6 +446,14 @@ bool sendHeartbeat() {
   String out;
   int code = httpPOST("/devices/me/heartbeat", body, out);
   Serial.printf("[HB] HTTP %d\n", code);
+
+  if (code == 401) {
+    Serial.println("[HB] Token invalido. Limpando NVS para novo claim.");
+    prefs.begin("yaguts", false);
+    prefs.remove("device_token");
+    prefs.end();
+    st_token = "";
+  }
   return code == 200;
 }
 
@@ -433,13 +499,31 @@ bool executeJob(const String& json) {
     runReservoir(frasco, ms);
   }
   if (!postJobStatus(jobId, "done")) Serial.println("[JOB] Falha ao reportar 'done'.");
+
+  // >>> NOVO: força um poll imediato após concluir
+  lastPoll = 0;
+  Serial.println("[JOB] Concluido. Forcando novo poll imediato.");
   return true;
 }
 
 bool pollNextJob() {
   String out;
   int code = httpGET("/devices/me/next_job", out);
-  if (code == 204) return false;
+
+  if (code == 401) {
+    Serial.println("[POLL] 401 — token invalido. Limpando NVS para novo claim.");
+    prefs.begin("yaguts", false);
+    prefs.remove("device_token");
+    prefs.end();
+    st_token = "";
+    return false;
+  }
+
+  if (code == 204) {
+    Serial.println("[POLL] HTTP 204 (sem job)");
+    return false;
+  }
+
   if (code == 200 && out.length() > 0) {
     Serial.println("[JOB] Recebido:");
     Serial.println(out);
@@ -452,14 +536,12 @@ bool pollNextJob() {
     }
     return true;
   }
+
   Serial.printf("[POLL] HTTP %d\n", code);
   return false;
 }
 
 // ---------- Setup / Loop ----------
-unsigned long lastHeartbeat = 0;
-unsigned long lastPoll = 0;
-
 void setupPins() {
   for (int i = 0; i < 4; i++) {
     pinMode(PIN_RES[i], OUTPUT);
@@ -477,9 +559,9 @@ void loadPrefs() {
   prefs.end();
 
 #if DEBUG_HTTP
-  Serial.printf("[PREFS] api_host='%s'  token=%s  claim=%s\n",
+  Serial.printf("[PREFS] api_host='%s'  token_len=%d  claim=%s\n",
                 st_api.c_str(),
-                st_token.length() ? maskToken(st_token).c_str() : "(none)",
+                st_token.length(),
                 st_claim.length() ? st_claim.c_str() : "(none)");
 #endif
 }
@@ -522,7 +604,7 @@ void loop() {
       }
       unsigned long now = millis();
       if (now - lastHeartbeat >= HEARTBEAT_EVERY_MS) { sendHeartbeat(); lastHeartbeat = now; }
-      if (now - lastPoll >= JOB_POLL_MS) { pollNextJob(); lastPoll = now; }
+      if (now - lastPoll >= JOB_POLL_MS)            { pollNextJob();  lastPoll = now; }
       delay(10);
     } break;
 
