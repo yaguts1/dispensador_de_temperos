@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKey,
     UniqueConstraint,
     DateTime,
+    Text,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -85,6 +86,36 @@ class ReservatorioConfig(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     dono = relationship("Usuario", backref="reservatorio_configs")
+
+
+# =========================
+# Dispositivos (ESP32)
+# =========================
+class Device(Base):
+    __tablename__ = "devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    uid = Column(String(64), nullable=False, unique=True, index=True)  # ex.: chipId
+    name = Column(String(120), nullable=True)
+    fw_version = Column(String(32), nullable=True)
+    status_json = Column(Text, nullable=True)
+    last_seen = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user = relationship("Usuario", backref="devices")
+
+
+class DeviceClaim(Base):
+    __tablename__ = "device_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    code = Column(String(6), nullable=False, unique=True, index=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+    user = relationship("Usuario")
 
 
 # =========================

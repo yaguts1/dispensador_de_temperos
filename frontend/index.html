@@ -173,7 +173,18 @@
       <form id="formRobo" class="card">
         <fieldset>
           <legend>Configuração do Robô</legend>
-          <p class="hint">Mapeie o que há em cada reservatório. O <strong>Rótulo</strong> deve ser escolhido da lista de temperos (padrão + criados nas suas receitas).</p>
+          <p class="hint">
+            Mapeie o que há em cada reservatório. O <strong>Rótulo</strong> deve ser escolhido da lista de temperos
+            (padrão + criados nas suas receitas).
+          </p>
+
+          <!-- Ação: Adicionar máquina (gera código de vínculo) -->
+          <div class="actions" style="margin-bottom:8px">
+            <button type="button" id="btnAddDevice" class="ghost with-icon">
+              <span class="icon icon-config" aria-hidden="true"></span>
+              <span>Adicionar máquina</span>
+            </button>
+          </div>
 
           <div class="robot-grid-header" aria-hidden="true">
             <div>Reservatório</div>

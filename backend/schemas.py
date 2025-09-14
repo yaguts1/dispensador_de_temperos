@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
@@ -127,3 +127,37 @@ class JobOut(BaseModel):
     erro_msg: Optional[str] = None
     itens: List[JobItemOut] = []
     model_config = ConfigDict(from_attributes=True)
+
+
+# =========================
+# Dispositivos (ESP32)
+# =========================
+class DeviceClaimOut(BaseModel):
+    code: str
+    expires_at: datetime
+
+
+class DeviceClaimIn(BaseModel):
+    uid: str = Field(..., min_length=4, max_length=64)      # ex.: chipId ou "esp32-xxxx"
+    claim_code: str = Field(..., min_length=6, max_length=6)  # 6 dígitos
+    fw_version: Optional[str] = None
+    mac: Optional[str] = None
+
+
+class DeviceOut(BaseModel):
+    id: int
+    uid: str
+    name: Optional[str] = None
+    fw_version: Optional[str] = None
+    last_seen: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class HeartbeatIn(BaseModel):
+    fw_version: Optional[str] = None
+    status: Optional[dict] = None  # telemetria leve
+
+
+class JobStatusIn(BaseModel):
+    status: Literal["running", "done", "error"]
+    error: Optional[str] = None

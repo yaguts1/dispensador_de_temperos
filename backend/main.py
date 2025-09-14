@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, Form, Query, Response, Request
+from fastapi import FastAPI, Depends, HTTPException, Form, Query, Response, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
@@ -9,6 +9,8 @@ from sqlalchemy import func
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 import os
+import json
+from random import randint
 
 from . import models, schemas, database
 
@@ -109,7 +111,7 @@ def root():
 
 
 # ---------------------------------------------------------------------
-# Auth helpers
+# Auth helpers (usuário)
 # ---------------------------------------------------------------------
 def get_current_user(
     request: Request,
@@ -143,6 +145,43 @@ def get_optional_user(
     except (JWTError, ValueError, TypeError):
         return None
     return db.query(models.Usuario).filter(models.Usuario.id == uid).first()
+
+
+# ---------------------------------------------------------------------
+# Auth helpers (dispositivo)
+# ---------------------------------------------------------------------
+def create_device_token(device_id: int, expires_delta: Optional[timedelta] = None) -> str:
+    payload = {"sub": f"dev:{device_id}", "typ": "device"}
+    return create_access_token(payload, expires_delta or timedelta(days=180))
+
+def _parse_bearer(authorization: Optional[str]) -> Optional[str]:
+    if not authorization:
+        return None
+    if not authorization.lower().startswith("bearer "):
+        return None
+    return authorization[7:].strip()
+
+def get_current_device(
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None),
+) -> models.Device:
+    token = _parse_bearer(authorization)
+    if not token:
+        raise HTTPException(status_code=401, detail="Token do dispositivo ausente.")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("typ") != "device":
+            raise JWTError("tipo inválido")
+        sub = payload.get("sub") or ""
+        if not sub.startswith("dev:"):
+            raise JWTError("sub inválido")
+        dev_id = int(sub.split(":", 1)[1])
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token inválido.")
+    dev = db.query(models.Device).filter(models.Device.id == dev_id).first()
+    if not dev:
+        raise HTTPException(status_code=401, detail="Dispositivo não encontrado.")
+    return dev
 
 
 # ---------------------------------------------------------------------
@@ -549,7 +588,8 @@ def put_config_robo(
 
 
 # ---------------------------------------------------------------------
-# Jobs — mapeamento + verificação/abatimento de estoque
+# Jobs — mapeamento + verificação
+#  (ABATIMENTO DE ESTOQUE AGORA É FEITO QUANDO O DISPOSITIVO FINALIZA O JOB)
 # ---------------------------------------------------------------------
 def _resolver_mapeamento(
     db: Session, user_id: int, ingredientes: List[models.IngredienteReceita]
@@ -639,7 +679,7 @@ def criar_job(
             detail=f"Calibração pendente (g/s) para: {', '.join(faltam_cal)}. Preencha na aba Robô.",
         )
 
-    # consumo por frasco (em g) considerando o multiplicador
+    # consumo por frasco (em g) considerando o multiplicador (apenas para validação)
     consumo_por_frasco = {}
     for frasco, _nome, q_g, _gps in itens_mapeados:
         consumo_por_frasco[frasco] = consumo_por_frasco.get(frasco, 0.0) + (q_g * payload.multiplicador)
@@ -657,7 +697,7 @@ def criar_job(
                 detail=f"Estoque insuficiente no Reservatório {frasco}: precisa {consumo} g, tem {cfg.estoque_g} g",
             )
 
-    # cria job + itens
+    # cria job + itens (NÃO ABAte estoque aqui!)
     job = models.Job(
         user_id=current.id,
         receita_id=receita.id,
@@ -685,15 +725,6 @@ def criar_job(
         )
         ordem += 1
 
-        # abate estoque se conhecido
-        cfg = (
-            db.query(models.ReservatorioConfig)
-            .filter(models.ReservatorioConfig.user_id == current.id, models.ReservatorioConfig.frasco == frasco)
-            .first()
-        )
-        if cfg and cfg.estoque_g is not None:
-            cfg.estoque_g = max(0.0, float(cfg.estoque_g) - total_g)
-
     db.commit()
     db.refresh(job)
     job = (
@@ -720,3 +751,150 @@ def obter_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado.")
     return job
+
+
+# ---------------------------------------------------------------------
+# Dispositivos: claim / heartbeat / polling de job
+# ---------------------------------------------------------------------
+@app.post("/devices/claims", response_model=schemas.DeviceClaimOut)
+def create_device_claim(
+    current: models.Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    # gera código 6 dígitos, expira em 10 minutos
+    expires = datetime.now(timezone.utc) + timedelta(minutes=10)
+    while True:
+        code = f"{randint(0, 999999):06d}"
+        exists = db.query(models.DeviceClaim).filter(models.DeviceClaim.code == code).first()
+        if not exists:
+            break
+    row = models.DeviceClaim(user_id=current.id, code=code, expires_at=expires)
+    db.add(row)
+    db.commit()
+    return schemas.DeviceClaimOut(code=code, expires_at=expires)
+
+
+@app.post("/devices/claim")
+def device_claim(payload: schemas.DeviceClaimIn, db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    claim = (
+        db.query(models.DeviceClaim)
+        .filter(
+            models.DeviceClaim.code == payload.claim_code,
+            models.DeviceClaim.used_at.is_(None),
+            models.DeviceClaim.expires_at > now,
+        )
+        .first()
+    )
+    if not claim:
+        raise HTTPException(status_code=400, detail="Código inválido ou expirado.")
+
+    # upsert por UID do device (ex.: chipId)
+    dev = db.query(models.Device).filter(models.Device.uid == payload.uid).first()
+    if not dev:
+        dev = models.Device(uid=payload.uid, user_id=claim.user_id)
+        db.add(dev)
+        db.flush()
+    else:
+        dev.user_id = claim.user_id  # reatribui (caso o mesmo HW troque de dono)
+
+    dev.fw_version = payload.fw_version
+    dev.last_seen = now
+
+    claim.used_at = now
+    db.commit()
+
+    token = create_device_token(dev.id)
+    return {"device_id": dev.id, "device_token": token, "heartbeat_sec": 30}
+
+
+@app.post("/devices/me/heartbeat")
+def device_heartbeat(
+    data: schemas.HeartbeatIn,
+    dev: models.Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    dev.last_seen = datetime.now(timezone.utc)
+    if data.fw_version:
+        dev.fw_version = data.fw_version
+    if data.status is not None:
+        dev.status_json = json.dumps(data.status)
+    db.commit()
+    return {"ok": True}
+
+
+@app.get("/devices/me/next_job", response_model=schemas.JobOut, responses={204: {"description": "Sem job"}})
+def device_next_job(
+    dev: models.Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    job = (
+        db.query(models.Job)
+        .options(selectinload(models.Job.itens), selectinload(models.Job.receita))
+        .join(models.Receita, models.Receita.id == models.Job.receita_id)
+        .filter(models.Receita.dono_id == dev.user_id, models.Job.status == "queued")
+        .order_by(models.Job.id.asc())
+        .first()
+    )
+    if not job:
+        return Response(status_code=204)
+
+    job.status = "running"
+    job.started_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+@app.post("/devices/me/jobs/{job_id}/status")
+def device_job_status(
+    job_id: int,
+    payload: schemas.JobStatusIn,
+    dev: models.Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    job = (
+        db.query(models.Job)
+        .options(selectinload(models.Job.itens), selectinload(models.Job.receita))
+        .filter(models.Job.id == job_id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+
+    # garante que o job é do mesmo usuário do dispositivo
+    dono_id = job.receita.dono_id if job.receita else job.user_id
+    if dono_id != dev.user_id:
+        raise HTTPException(status_code=403, detail="Job não pertence a este usuário/dispositivo.")
+
+    now = datetime.now(timezone.utc)
+    if payload.status == "running":
+        job.status = "running"
+        if not job.started_at:
+            job.started_at = now
+    elif payload.status == "done":
+        job.status = "done"
+        job.finished_at = now
+
+        # >>> ABATE ESTOQUE AQUI (após execução bem-sucedida) <<<
+        consumo_por_frasco = {}
+        for it in job.itens:
+            consumo_por_frasco[it.frasco] = consumo_por_frasco.get(it.frasco, 0.0) + float(it.quantidade_g or 0)
+        for frasco, total_g in consumo_por_frasco.items():
+            cfg = (
+                db.query(models.ReservatorioConfig)
+                .filter(
+                    models.ReservatorioConfig.user_id == dev.user_id,
+                    models.ReservatorioConfig.frasco == frasco,
+                )
+                .first()
+            )
+            if cfg and cfg.estoque_g is not None:
+                cfg.estoque_g = max(0.0, float(cfg.estoque_g) - float(total_g))
+    else:
+        job.status = "failed"
+        job.finished_at = now
+        job.erro_msg = payload.error or "erro não especificado"
+
+    db.commit()
+    return {"ok": True}

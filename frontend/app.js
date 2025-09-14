@@ -82,6 +82,7 @@ class App {
       formRobo: document.getElementById('formRobo'),
       btnSalvarRobo: document.getElementById('btnSalvarRobo'),
       btnRecarregarRobo: document.getElementById('btnRecarregarRobo'),
+      btnAddDevice: document.getElementById('btnAddDevice'),
       roboFields: {
         1: { rotulo: document.getElementById('r1_rotulo'), estoque: document.getElementById('r1_estoque'), g: document.getElementById('r1_gps') },
         2: { rotulo: document.getElementById('r2_rotulo'), estoque: document.getElementById('r2_estoque'), g: document.getElementById('r2_gps') },
@@ -316,6 +317,18 @@ class App {
       if (!this.ensureAuthOrPrompt()) return;
       this.loadRobotConfig(true);
     });
+    if (this.els.btnAddDevice) {
+      this.els.btnAddDevice.addEventListener('click', async () => {
+        if (!this.ensureAuthOrPrompt()) return;
+        try {
+          const data = await jfetch(`${API_URL}/devices/claims`, { method: 'POST' });
+          this.toast(`Código: ${data.code} (expira em 10 min)`, 'ok');
+          alert(`Código para vincular no ESP:\n\n${data.code}\n\nAbra o Wi-Fi do ESP, informe SSID/senha da sua rede e este código.`);
+        } catch (e) {
+          this.toast(e.message || 'Falha ao gerar código', 'err');
+        }
+      });
+    }
 
     // Consulta: busca ao digitar + Enter + Botão
     if (this.els.buscaNome) {
