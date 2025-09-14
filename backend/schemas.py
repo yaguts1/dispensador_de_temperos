@@ -85,10 +85,11 @@ class UsuarioPublic(BaseModel):
 # =========================
 class ReservatorioConfigIn(BaseModel):
     frasco: int = Field(..., ge=1, le=4)
-    # o rótulo deve ser o nome do tempero contido
+    # o rótulo deve ser o nome do tempero contido (catálogo controlado)
     rotulo: Optional[str] = Field(default=None, max_length=80)
-    conteudo: Optional[str] = Field(default=None, max_length=120)
     g_por_seg: Optional[float] = Field(default=None, gt=0)
+    # estoque atual do frasco, em gramas (None = desconhecido)
+    estoque_g: Optional[float] = Field(default=None, ge=0)
 
 
 class ReservatorioConfigOut(ReservatorioConfigIn):

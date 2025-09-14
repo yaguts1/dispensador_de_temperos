@@ -51,7 +51,7 @@ class IngredienteReceita(Base):
     # nome do tempero (ex.: "sal", "pimenta")
     tempero = Column(String(60), nullable=False)
 
-    # gramas (inteiro 1..500; validado na camada de API)
+    # gramas (inteiro 1..500 na API; aqui mantemos float por compat)
     quantidade = Column(Float, nullable=False)
 
     receita = relationship("Receita", back_populates="ingredientes")
@@ -72,10 +72,16 @@ class ReservatorioConfig(Base):
         index=True,
     )
     frasco = Column(Integer, nullable=False)  # 1..4
-    # rótulo = nome do tempero contido
-    rotulo = Column(String(80), nullable=True)  # ex.: "Pimenta"
-    conteudo = Column(String(120), nullable=True)  # ex.: "moída", opcional
-    g_por_seg = Column(Float, nullable=True)  # calibração (g/s), opcional > 0
+
+    # rótulo = nome do tempero contido (controlado pelo catálogo)
+    rotulo = Column(String(80), nullable=True)
+
+    # calibração (g/s), opcional > 0
+    g_por_seg = Column(Float, nullable=True)
+
+    # ESTOQUE atual do frasco em gramas (None = desconhecido)
+    estoque_g = Column(Float, nullable=True)
+
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     dono = relationship("Usuario", backref="reservatorio_configs")

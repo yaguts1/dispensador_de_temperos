@@ -2,11 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException, Form, Query, Response, Requ
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
-from sqlalchemy.exc import IntegrityError
 from passlib.hash import bcrypt
 from typing import Optional, List, Iterable, Tuple
 from starlette import status
-from sqlalchemy import func, and_
+from sqlalchemy import func
 from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 import os
@@ -534,14 +533,14 @@ def put_config_robo(
                 user_id=current.id,
                 frasco=it.frasco,
                 rotulo=it.rotulo,
-                conteudo=it.conteudo,
                 g_por_seg=it.g_por_seg,
+                estoque_g=it.estoque_g,
             )
             db.add(row)
         else:
             row.rotulo = it.rotulo
-            row.conteudo = it.conteudo
             row.g_por_seg = it.g_por_seg
+            row.estoque_g = it.estoque_g
         db.flush()
         result.append(row)
 
@@ -550,21 +549,22 @@ def put_config_robo(
 
 
 # ---------------------------------------------------------------------
-# Jobs — enfileirar execução
+# Jobs — mapeamento + verificação/abatimento de estoque
 # ---------------------------------------------------------------------
 def _resolver_mapeamento(
     db: Session, user_id: int, ingredientes: List[models.IngredienteReceita]
-) -> Tuple[List[Tuple[int, str, int]], List[str], List[str]]:
+) -> Tuple[List[Tuple[int, str, int, float]], List[str], List[str]]:
     """
     Retorna:
-      - lista de tuplas (frasco, tempero, quantidade_g) já mapeadas,
+      - lista de tuplas (frasco, tempero, quantidade_g, g_por_seg) já mapeadas,
       - lista de temperos com mapeamento ausente,
       - lista de temperos sem calibração (g/s ausente ou <=0)
+
     Regras:
       - match por rotulo == tempero (case-insensitive)
       - se vários frascos tiverem o mesmo rótulo, prioriza os com g/s definido; desempate por número do frasco.
     """
-    itens_mapeados: List[Tuple[int, str, int]] = []
+    itens_mapeados: List[Tuple[int, str, int, float]] = []
     faltam_mapeamento: List[str] = []
     faltam_calibracao: List[str] = []
 
@@ -594,7 +594,7 @@ def _resolver_mapeamento(
             faltam_calibracao.append(nome)
             continue
 
-        itens_mapeados.append((cfg.frasco, nome, q_g))
+        itens_mapeados.append((cfg.frasco, nome, q_g, float(cfg.g_por_seg)))
 
     return itens_mapeados, faltam_mapeamento, faltam_calibracao
 
@@ -605,6 +605,7 @@ def criar_job(
     current: models.Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
+    # 1 job por vez
     ativo = (
         db.query(models.Job)
         .filter(
@@ -638,6 +639,25 @@ def criar_job(
             detail=f"Calibração pendente (g/s) para: {', '.join(faltam_cal)}. Preencha na aba Robô.",
         )
 
+    # consumo por frasco (em g) considerando o multiplicador
+    consumo_por_frasco = {}
+    for frasco, _nome, q_g, _gps in itens_mapeados:
+        consumo_por_frasco[frasco] = consumo_por_frasco.get(frasco, 0.0) + (q_g * payload.multiplicador)
+
+    # valida estoque conhecido (None = desconhecido → não bloqueia)
+    for frasco, consumo in consumo_por_frasco.items():
+        cfg = (
+            db.query(models.ReservatorioConfig)
+            .filter(models.ReservatorioConfig.user_id == current.id, models.ReservatorioConfig.frasco == frasco)
+            .first()
+        )
+        if cfg and cfg.estoque_g is not None and cfg.estoque_g < consumo:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Estoque insuficiente no Reservatório {frasco}: precisa {consumo} g, tem {cfg.estoque_g} g",
+            )
+
+    # cria job + itens
     job = models.Job(
         user_id=current.id,
         receita_id=receita.id,
@@ -648,18 +668,9 @@ def criar_job(
     db.flush()
 
     ordem = 1
-    for frasco, nome, q_g in itens_mapeados:
-        cfg = (
-            db.query(models.ReservatorioConfig)
-            .filter(
-                models.ReservatorioConfig.user_id == current.id,
-                models.ReservatorioConfig.frasco == frasco,
-            )
-            .first()
-        )
-        gps = (cfg.g_por_seg or 0.0)
-        total_g = q_g * payload.multiplicador
-        segundos = round(float(total_g) / float(gps), 3) if gps > 0 else 0.0
+    for frasco, nome, q_g, gps in itens_mapeados:
+        total_g = float(q_g * payload.multiplicador)
+        segundos = round(total_g / float(gps), 3) if gps > 0 else 0.0
 
         db.add(
             models.JobItem(
@@ -667,12 +678,21 @@ def criar_job(
                 ordem=ordem,
                 frasco=frasco,
                 tempero=nome,
-                quantidade_g=float(total_g),
+                quantidade_g=total_g,
                 segundos=segundos,
                 status="queued",
             )
         )
         ordem += 1
+
+        # abate estoque se conhecido
+        cfg = (
+            db.query(models.ReservatorioConfig)
+            .filter(models.ReservatorioConfig.user_id == current.id, models.ReservatorioConfig.frasco == frasco)
+            .first()
+        )
+        if cfg and cfg.estoque_g is not None:
+            cfg.estoque_g = max(0.0, float(cfg.estoque_g) - total_g)
 
     db.commit()
     db.refresh(job)
