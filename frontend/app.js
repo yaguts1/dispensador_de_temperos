@@ -83,10 +83,10 @@ class App {
       btnSalvarRobo: document.getElementById('btnSalvarRobo'),
       btnRecarregarRobo: document.getElementById('btnRecarregarRobo'),
       roboFields: {
-        1: { rotulo: document.getElementById('r1_rotulo'), conteudo: document.getElementById('r1_conteudo'), g: document.getElementById('r1_gps') },
-        2: { rotulo: document.getElementById('r2_rotulo'), conteudo: document.getElementById('r2_conteudo'), g: document.getElementById('r2_gps') },
-        3: { rotulo: document.getElementById('r3_rotulo'), conteudo: document.getElementById('r3_conteudo'), g: document.getElementById('r3_gps') },
-        4: { rotulo: document.getElementById('r4_rotulo'), conteudo: document.getElementById('r4_conteudo'), g: document.getElementById('r4_gps') },
+        1: { rotulo: document.getElementById('r1_rotulo'), estoque: document.getElementById('r1_estoque'), g: document.getElementById('r1_gps') },
+        2: { rotulo: document.getElementById('r2_rotulo'), estoque: document.getElementById('r2_estoque'), g: document.getElementById('r2_gps') },
+        3: { rotulo: document.getElementById('r3_rotulo'), estoque: document.getElementById('r3_estoque'), g: document.getElementById('r3_gps') },
+        4: { rotulo: document.getElementById('r4_rotulo'), estoque: document.getElementById('r4_estoque'), g: document.getElementById('r4_gps') },
       },
 
       // ui
@@ -896,10 +896,16 @@ class App {
     for (let i = 1; i <= 4; i++) {
       const f = this.els.roboFields[i];
       const rotulo = (f.rotulo.value || '').trim() || null;
-      const conteudo = f.conteudo.value.trim() || null;
+
+      const estxt = f.estoque.value.trim();
+      const estoqueNum = estxt === '' ? null : Number(estxt);
+      const estoque = Number.isFinite(estoqueNum) ? estoqueNum : null;
+
       const gtxt = f.g.value.trim();
-      const g = gtxt === '' ? null : Number(gtxt);
-      arr.push({ frasco: i, rotulo, conteudo, g_por_seg: Number.isFinite(g) ? g : null });
+      const gNum = gtxt === '' ? null : Number(gtxt);
+      const g = Number.isFinite(gNum) ? gNum : null;
+
+      arr.push({ frasco: i, rotulo, g_por_seg: g, estoque_g: estoque });
     }
     return arr;
   }
@@ -909,7 +915,7 @@ class App {
     for (let i = 1; i <= 4; i++) {
       const f = this.els.roboFields[i];
       f.rotulo.value = '';
-      f.conteudo.value = '';
+      f.estoque.value = '';
       f.g.value = '';
     }
     // preenche
@@ -917,7 +923,7 @@ class App {
       const f = this.els.roboFields[it.frasco];
       if (!f) continue;
       f.rotulo.value = it.rotulo ?? '';
-      f.conteudo.value = it.conteudo ?? '';
+      f.estoque.value = (it.estoque_g ?? '') === '' ? '' : String(it.estoque_g);
       f.g.value = (it.g_por_seg ?? '') === '' ? '' : String(it.g_por_seg);
     }
   }
