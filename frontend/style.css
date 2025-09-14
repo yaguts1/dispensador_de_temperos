@@ -2,14 +2,13 @@
 /* Design tokens         */
 /* ===================== */
 :root {
-  /* Cores */
-  --bg: #0b1020;                /* fundo geral (leve tom azulado) */
-  --surface: #0f162e;           /* cartões */
-  --surface-2: #0c1327;         /* variação */
-  --ink: #e8ecf8;               /* texto principal */
-  --muted: #a9b1c7;             /* texto secundário */
-  --primary: #4f7cff;           /* azul vivo */
-  --primary-weak: #1b2a58;      /* anel/hover */
+  --bg: #0b1020;
+  --surface: #0f162e;
+  --surface-2: #0c1327;
+  --ink: #e8ecf8;
+  --muted: #a9b1c7;
+  --primary: #4f7cff;
+  --primary-weak: #1b2a58;
   --success: #22c55e;
   --danger: #ef4444;
 
@@ -20,9 +19,8 @@
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Mobile ergonomics */
-  --tap: 44px;                  /* alvo mínimo de toque */
-  --icon: 24px;                 /* tamanho padrão de ícone */
+  --tap: 44px;
+  --icon: 24px;
 }
 
 /* ===================== */
@@ -44,6 +42,7 @@ body {
 img, svg { max-width: 100%; display: block; }
 button { font: inherit; }
 
+/* Container fluido */
 .container {
   width: min(100%, 960px);
   margin-inline: auto;
@@ -65,18 +64,9 @@ button { font: inherit; }
 .header-row {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
   min-height: 48px;
 }
-.header-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-}
-.header-row .tabs { width: 100%; margin-top: 6px; }
-@media (min-width: 720px) { .header-row .tabs { margin-top: 10px; } }
 
 /* Auth box */
 .auth-box {
@@ -87,7 +77,7 @@ button { font: inherit; }
 }
 .auth-box .lead { margin: 0; }
 
-/* Tabs */
+/* Abas */
 .tabs {
   display: flex;
   gap: 8px;
@@ -103,9 +93,12 @@ button { font: inherit; }
   cursor: pointer;
   font-weight: 700;
   min-height: var(--tap);
-  transition: transform .15s, box-shadow .15s, background .15s;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
 }
-.tabs button[aria-selected="true"] { background: var(--primary); color: #fff; }
+.tabs button[aria-selected="true"] {
+  background: var(--primary);
+  color: #fff;
+}
 .tabs button:hover { box-shadow: 0 4px 10px rgba(79,124,255,.25); transform: translateY(-2px); }
 
 @media (max-width: 640px) {
@@ -115,9 +108,7 @@ button { font: inherit; }
   .tabs button { flex: 1; }
 }
 
-/* ===================== */
-/* Cards & subtle cards  */
-/* ===================== */
+/* Cards */
 .card {
   background: var(--surface);
   border-radius: var(--radius);
@@ -127,9 +118,7 @@ button { font: inherit; }
 }
 .card.subtle { background: var(--surface-2); box-shadow: none; }
 
-/* ===================== */
-/* Formulário            */
-/* ===================== */
+/* Formulário */
 fieldset {
   border: 1px solid rgba(255,255,255,.06);
   border-radius: var(--radius);
@@ -137,9 +126,13 @@ fieldset {
   margin: 0 0 14px;
   background: linear-gradient(180deg, rgba(255,255,255,.02), rgba(255,255,255,.00));
 }
-legend { padding: 0 8px; font-weight: 800; color: #dfe6ff; }
+legend {
+  padding: 0 8px;
+  font-weight: 800;
+  color: #dfe6ff;
+}
 label { display: block; font-weight: 700; margin: 8px 0 6px; }
-.hint, small, .form-hint { color: var(--muted); }
+.hint, small { color: var(--muted); }
 
 input, select {
   width: 100%;
@@ -151,17 +144,17 @@ input, select {
   outline: none;
   font-size: 16px;
   min-height: var(--tap);
-  transition: border-color .15s, box-shadow .15s, background .15s;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 input::placeholder { color: #8b94ac; }
 input:focus, select:focus { border-color: var(--primary); box-shadow: var(--ring); }
+
+/* number spin */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; }
 
-/* ===================== */
-/* Ações / Botões        */
-/* ===================== */
+/* Ações / Botões */
 .actions {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
@@ -177,17 +170,16 @@ button[type="submit"], button[type="button"] {
   cursor: pointer;
   text-align: center;
   min-height: var(--tap);
-  transition: transform .15s, box-shadow .15s, background .15s;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
 }
 button:hover { transform: translateY(-2px); }
 button.primary { background: var(--success); color: #04120a; }
 button.ghost   { background: #12204a; color: #cfe0ff; border: 1px solid #263a7a; }
 button.dark    { background: #0a1128; color: #fff; }
+
 @media (max-width: 700px) { .actions { grid-template-columns: 1fr; } }
 
-/* ===================== */
-/* Grid de ingredientes  */
-/* ===================== */
+/* Grid de ingredientes */
 .grid-header {
   display: grid;
   grid-template-columns: 1.2fr .9fr 40px;
@@ -206,7 +198,8 @@ button.dark    { background: #0a1128; color: #fff; }
 .ingredient-row {
   display: grid;
   grid-template-columns: 1.2fr .9fr 40px;
-  gap: 8px; align-items: center;
+  gap: 8px;
+  align-items: center;
 }
 .ingredient-row + .ingredient-row { margin-top: 0; }
 
@@ -222,9 +215,7 @@ button.dark    { background: #0a1128; color: #fff; }
   .mobile-label { display: block; }
 }
 
-/* ===================== */
-/* Busca / Lista         */
-/* ===================== */
+/* Lista / Cards */
 .search-bar {
   display: grid;
   grid-template-columns: 1fr auto auto;
@@ -244,7 +235,6 @@ button.dark    { background: #0a1128; color: #fff; }
 }
 .recipe-item h4 { margin: .2rem 0; font-size: 1.05rem; }
 
-/* tags */
 .recipe-tags, .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .recipe-tag, .tag {
   display: inline-block;
@@ -256,67 +246,60 @@ button.dark    { background: #0a1128; color: #fff; }
   font-weight: 700;
 }
 
-/* ===================== */
-/* Cards: ícones de ação */
-/* ===================== */
+/* Ações do card */
 .card-actions {
   position: absolute;
   top: 10px;
   right: 10px;
-  display: flex; gap: 8px;
+  display: flex;
+  gap: 8px;
 }
 .icon-btn {
   display: inline-flex;
-  align-items: center; justify-content: center;
-  width: var(--tap); height: var(--tap);
+  align-items: center;
+  justify-content: center;
+  width: var(--tap);
+  height: var(--tap);
   padding: 0 !important;
   border-radius: 12px;
   border: 1px solid rgba(255,255,255,.08);
-  background: #0b1330; color: #cfe0ff;
+  background: #0b1330;
+  color: #cfe0ff;
   cursor: pointer;
-  transition: transform .15s, box-shadow .15s, background .15s, opacity .15s;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease, opacity .15s ease;
 }
-.icon-btn.primary { background: var(--success); color: #04120a; }
 .icon-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(79,124,255,.25); }
 .icon-btn.dark  { background: #0a1128; color: #fff; }
 .icon-btn.ghost { background: #12204a; color: #cfe0ff; }
-
 .icon-btn .icon,
 .icon-btn > img {
-  width: var(--icon); height: var(--icon);
-  min-width: var(--icon); min-height: var(--icon);
+  width: var(--icon);
+  height: var(--icon);
+  min-width: var(--icon);
+  min-height: var(--icon);
   flex: 0 0 var(--icon);
   display: block;
   pointer-events: none;
 }
 
-/* ===== Ícones via CSS mask com arquivos em ./Assets/ ===== */
+/* Ícones CSS */
 .icon-btn .icon { background: currentColor; }
-
-/* play (executar) */
-.icon-play{
-  background: currentColor;
-  -webkit-mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
-          mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
-}
-/* lápis (editar) */
 .icon-edit{
   -webkit-mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
           mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
 }
-/* lixeira (excluir) */
 .icon-trash{
   -webkit-mask: url("./Assets/delete-2-svgrepo-com.svg") no-repeat center / contain;
           mask: url("./Assets/delete-2-svgrepo-com.svg") no-repeat center / contain;
 }
 
-/* =========================== */
-/* Lista de ingredientes       */
-/* =========================== */
+/* Lista de ingredientes */
 .ingredients {
   list-style: none;
-  margin: 10px 0 0; padding: 0;
-  display: grid; gap: 8px;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
 }
 .ingredient-line {
   display: grid;
@@ -331,13 +314,17 @@ button.dark    { background: #0a1128; color: #fff; }
 .ingredient-name { font-weight: 700; }
 .qty { color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* Badges de frasco (usadas na aba Robô e nos cards) */
+/* Badges por frasco */
 .reservoir-badge {
   display: inline-flex;
-  align-items: center; gap: 6px;
-  font-size: .9rem; font-weight: 700;
-  border-radius: 999px; padding: 4px 10px;
-  border: 1px solid transparent; white-space: nowrap;
+  align-items: center;
+  gap: 6px;
+  font-size: .9rem;
+  font-weight: 700;
+  border-radius: 999px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  white-space: nowrap;
 }
 .reservoir-badge.r1 { background: rgba(79,124,255,.12);  color: #cfe0ff; border-color: rgba(79,124,255,.25); }
 .reservoir-badge.r2 { background: rgba(34,197,94,.12);   color: #bbf7d0; border-color: rgba(34,197,94,.25); }
@@ -349,32 +336,7 @@ button.dark    { background: #0a1128; color: #fff; }
   .reservoir-badge .short { display: inline; }
 }
 
-/* ===================== */
-/* Robô: grelha          */
-/* ===================== */
-.robot-grid-header {
-  display: grid;
-  grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
-  gap: 8px;
-  margin: .4rem 0;
-}
-.robot-grid-header div{
-  font-size: .9rem; color:#e6ebff; background:#1a2870;
-  padding:8px; border-radius:10px; text-align:center;
-}
-.robot-row {
-  display: grid;
-  grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
-  gap: 8px; align-items: center;
-}
-@media (max-width: 720px){
-  .robot-grid-header{ display:none; }
-  .robot-row{ grid-template-columns: 1fr; }
-}
-
-/* ===================== */
-/* Logs / code           */
-/* ===================== */
+/* Code / details */
 details summary { cursor: pointer; font-weight: 700; }
 pre {
   white-space: pre-wrap;
@@ -387,9 +349,7 @@ pre {
   font-size: 13px;
 }
 
-/* ===================== */
-/* Dialogs               */
-/* ===================== */
+/* Dialog */
 dialog {
   border: 1px solid rgba(255,255,255,.12);
   background: var(--surface);
@@ -402,10 +362,9 @@ dialog::backdrop {
   background: rgba(0,0,0,.5);
   backdrop-filter: blur(2px);
 }
+dialog .card { margin: 0; }
 
-/* ===================== */
-/* Toast                 */
-/* ===================== */
+/* Toast */
 #toast {
   position: fixed;
   left: 50%;
@@ -424,13 +383,19 @@ dialog::backdrop {
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(-4px); }
 
-/* ===================== */
-/* Acessibilidade extra  */
-/* ===================== */
+/* A11y */
 :focus-visible { outline: none; box-shadow: var(--ring); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+noscript {
+  display: block;
+  padding: 12px;
+  color: #fff;
+  background: #ef4444;
+  text-align: center;
+  margin-top: 12px;
+}
 
-/* Botões com ícone (texto + pictograma) */
+/* Botões com ícone */
 button.with-icon {
   display: inline-flex;
   align-items: center;
@@ -445,7 +410,7 @@ button.with-icon .icon {
   background: currentColor;
 }
 
-/* Novos ícones globais (fora de .icon-btn) */
+/* Novos ícones */
 .icon-login{
   background: currentColor;
   -webkit-mask: url("./Assets/login-2-svgrepo-com.svg") no-repeat center / contain;

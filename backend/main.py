@@ -44,6 +44,15 @@ COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", ".yaguts.com.br")  # para dev local, 
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "1") == "1"        # produção: 1, dev: 0
 COOKIE_SAMESITE = "Lax"  # subdomínios são "same-site", Lax funciona bem
 
+# Catálogo base (padrão) — pode expandir aqui
+DEFAULT_TEMPEROS = [
+    "Pimenta",
+    "Sal",
+    "Alho em pó",
+    "Orégano",
+    "Cominho",
+]
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -121,6 +130,22 @@ def get_current_user(
     return user
 
 
+def get_optional_user(
+    request: Request,
+    db: Session = Depends(get_db),
+) -> Optional[models.Usuario]:
+    """Versão que NÃO erra 401 — usada para o catálogo (retorna default se sem sessão)."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        uid = int(payload.get("sub"))
+    except (JWTError, ValueError, TypeError):
+        return None
+    return db.query(models.Usuario).filter(models.Usuario.id == uid).first()
+
+
 # ---------------------------------------------------------------------
 # Usuários / Autenticação
 # ---------------------------------------------------------------------
@@ -192,12 +217,12 @@ def _valida_ingredientes(ingredientes: Iterable[schemas.IngredienteBase]) -> Lis
         try:
             q = int(ing.quantidade)
         except Exception:
-            raise HTTPException(status_code=400, detail=f"Quantidade inválida para '{ing.tempero}'. Use um inteiro 1–500 g.")
+            raise HTTPException(status_code=400, detail=f"Quantidade inválida para '{(ing.tempero or '').strip()}'. Use um inteiro 1–500 g.")
         if q < 1 or q > 500:
-            raise HTTPException(status_code=400, detail=f"A quantidade de '{ing.tempero}' deve ser um inteiro entre 1 e 500 g.")
+            raise HTTPException(status_code=400, detail=f"A quantidade de '{(ing.tempero or '').strip()}' deve ser um inteiro entre 1 e 500 g.")
         ing.quantidade = q
 
-        nome = ing.tempero.strip()
+        nome = (ing.tempero or "").strip()
         if not nome:
             raise HTTPException(status_code=400, detail="O nome do tempero não pode ser vazio.")
         if len(nome) > 60:
@@ -213,6 +238,49 @@ def _carregar_receita(db: Session, id: int) -> models.Receita:
         .filter(models.Receita.id == id)
         .first()
     )
+
+
+def _get_tempero_catalog(db: Session, user_id: Optional[int]) -> List[str]:
+    """
+    Retorna a lista de temperos disponível para seleção de rótulos dos reservatórios:
+    - DEFAULT_TEMPEROS + todos os temperos usados nas receitas do usuário (únicos, case-insensitive)
+    """
+    base = list(DEFAULT_TEMPEROS)
+    extras: List[str] = []
+    if user_id:
+        rows = (
+            db.query(models.IngredienteReceita.tempero)
+            .join(models.Receita, models.IngredienteReceita.receita_id == models.Receita.id)
+            .filter(models.Receita.dono_id == user_id)
+            .distinct()
+            .all()
+        )
+        extras = [r[0] for r in rows if r[0]]
+
+    seen = {}
+    for name in base + extras:
+        if not name:
+            continue
+        k = name.strip()
+        if not k:
+            continue
+        low = k.lower()
+        if low not in seen:
+            seen[low] = k  # preserva a primeira grafia
+    # ordena de forma amigável
+    return sorted(seen.values(), key=lambda s: s.casefold())
+
+
+# ---------------------------------------------------------------------
+# Catálogo de temperos
+# ---------------------------------------------------------------------
+@app.get("/catalogo/temperos", response_model=List[str])
+def catalogo_temperos(
+    opt_user: Optional[models.Usuario] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+):
+    user_id = opt_user.id if opt_user else None
+    return _get_tempero_catalog(db, user_id)
 
 
 # ---------------------------------------------------------------------
@@ -349,7 +417,6 @@ def excluir_receita(
 
 # ---------------------------------------------------------------------
 # Receitas (FORM HTML com até 4 linhas) — usa cookie de sessão
-# Agora sem "reservatório" no formulário: apenas tempero/quantidade
 # ---------------------------------------------------------------------
 @app.post("/receitas/form", response_model=schemas.Receita, status_code=status.HTTP_201_CREATED)
 def criar_receita_form(
@@ -422,6 +489,7 @@ def put_config_robo(
     db: Session = Depends(get_db),
     current: models.Usuario = Depends(get_current_user),
 ):
+    # valida frascos e duplicidade
     vistos = set()
     for it in itens:
         if it.frasco in vistos:
@@ -430,6 +498,27 @@ def put_config_robo(
         if it.frasco < 1 or it.frasco > 4:
             raise HTTPException(status_code=400, detail="Frasco deve ser 1..4.")
 
+    # carrega catálogo permitido e cria índice case-insensitive
+    catalogo = _get_tempero_catalog(db, current.id)
+    idx = {c.lower(): c for c in catalogo}
+
+    # normaliza/valida rótulos conforme catálogo
+    for it in itens:
+        if it.rotulo is None:
+            continue
+        r = it.rotulo.strip()
+        if r == "":
+            it.rotulo = None
+            continue
+        canon = idx.get(r.lower())
+        if not canon:
+            raise HTTPException(
+                status_code=400,
+                detail="Rótulo inválido. Escolha apenas temperos da lista disponível."
+            )
+        it.rotulo = canon  # normaliza para a grafia canônica do catálogo
+
+    # upsert
     result = []
     for it in itens:
         row = (
@@ -461,7 +550,7 @@ def put_config_robo(
 
 
 # ---------------------------------------------------------------------
-# Jobs — enfileirar execução (mapeamento dinâmico por rótulo)
+# Jobs — enfileirar execução
 # ---------------------------------------------------------------------
 def _resolver_mapeamento(
     db: Session, user_id: int, ingredientes: List[models.IngredienteReceita]
@@ -516,7 +605,6 @@ def criar_job(
     current: models.Usuario = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    # um job por vez por usuário
     ativo = (
         db.query(models.Job)
         .filter(
@@ -535,7 +623,6 @@ def criar_job(
     if not receita or receita.dono_id != current.id:
         raise HTTPException(status_code=404, detail="Receita não encontrada.")
 
-    # mapeamento dinâmico: ingrediente -> frasco (via rotulo)
     itens_mapeados, faltam_map, faltam_cal = _resolver_mapeamento(db, current.id, receita.ingredientes)
 
     if faltam_map:
@@ -551,7 +638,6 @@ def criar_job(
             detail=f"Calibração pendente (g/s) para: {', '.join(faltam_cal)}. Preencha na aba Robô.",
         )
 
-    # criar job + itens
     job = models.Job(
         user_id=current.id,
         receita_id=receita.id,
@@ -559,7 +645,7 @@ def criar_job(
         multiplicador=payload.multiplicador,
     )
     db.add(job)
-    db.flush()  # para obter job.id
+    db.flush()
 
     ordem = 1
     for frasco, nome, q_g in itens_mapeados:

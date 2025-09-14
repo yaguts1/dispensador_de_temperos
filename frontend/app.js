@@ -1,15 +1,6 @@
 // ================== Configurações ==================
 const API_URL = 'https://api.yaguts.com.br';
 
-const INGREDIENTS = [
-  { value: '', label: 'Selecione...' },
-  { value: 'pimenta', label: 'Pimenta' },
-  { value: 'sal', label: 'Sal' },
-  { value: 'alho', label: 'Alho em pó' },
-  { value: 'oregano', label: 'Orégano' },
-  { value: 'cominho', label: 'Cominho' },
-];
-
 // Busca ao digitar
 const AUTOCOMPLETE_MIN_CHARS = 1;
 const TYPING_DEBOUNCE_MS = 200;
@@ -32,13 +23,30 @@ async function jfetch(url, opts = {}) {
   return data;
 }
 
+// pequenas helpers de DOM
+function el(tag, props = {}, ...children) {
+  const n = document.createElement(tag);
+  Object.entries(props).forEach(([k, v]) => {
+    if (k === 'className') n.className = v;
+    else if (k === 'dataset') Object.assign(n.dataset, v);
+    else if (k in n) n[k] = v;
+    else n.setAttribute(k, v);
+  });
+  for (const c of children) {
+    if (c == null) continue;
+    n.append(c.nodeType ? c : document.createTextNode(c));
+  }
+  return n;
+}
+
 // ================== App ==================
 class App {
   constructor() {
     this.state = { isEditing: false, editId: null, roboLoaded: false };
-    this.user = null;               // {id, nome} quando logado
-    this.robotCfg = [];             // itens do GET /config/robo
-    this.robotCfgIndex = {};        // índice por rótulo (lowercase)
+    this.user = null; // {id, nome} quando logado
+    this.robotCfg = [];       // itens do GET /config/robo
+    this.robotCfgIndex = {};  // índice por rótulo (lowercase)
+    this.catalogoTemperos = []; // lista padrão + extras do usuário
 
     this.els = {
       // abas e panes
@@ -63,7 +71,7 @@ class App {
       editNome: document.getElementById('editNome'),
       editId: document.getElementById('editId'),
 
-      // consulta
+      // consulta (por nome com autocomplete)
       buscaNome: document.getElementById('q'),
       listaSugestoes: document.getElementById('listaSugestoes'),
       btnBuscar: document.getElementById('btnBuscar'),
@@ -85,7 +93,7 @@ class App {
       dlgExcluir: document.getElementById('dlgExcluir'),
       toast: document.getElementById('toast'),
       headerRow: document.querySelector('.header-row'),
-      headerTop: document.querySelector('.header-top'),
+      datalistTemperos: document.getElementById('catTemperos'),
     };
 
     // timers / abort
@@ -104,9 +112,10 @@ class App {
   async init() {
     this.ensureAuthBox();
     this.bindEvents();
-    await this.refreshAuth();                 // tenta descobrir sessão atual
+    await this.refreshAuth();          // tenta descobrir sessão atual
+    await this.loadTemperoCatalog();   // catálogo padrão (+ extras do user, se houver)
     if (this.user) { await this.loadRobotConfig(); } // já deixa em cache
-    this.renderIngredientRow();               // primeira linha vazia
+    this.renderIngredientRow();        // primeira linha vazia (usa datalist do catálogo)
     this.selectTab('consultar');
     this.handleListAll();
   }
@@ -117,7 +126,7 @@ class App {
     if (!this.els.authBox) {
       const box = document.createElement('div');
       box.className = 'auth-box';
-      (this.els.headerTop || this.els.headerRow)?.appendChild(box);
+      this.els.headerRow?.appendChild(box);
       this.els.authBox = box;
     }
     this.renderAuthBox();
@@ -135,9 +144,15 @@ class App {
       const btnOut = document.createElement('button');
       btnOut.className = 'ghost with-icon';
       btnOut.type = 'button';
-      // usa o mesmo ícone “login”, espelhado para sugerir “sair”
       btnOut.innerHTML = '<span class="icon icon-login" aria-hidden="true" style="transform: scaleX(-1)"></span><span>Sair</span>';
-      btnOut.addEventListener('click', () => this.logout());
+      btnOut.addEventListener('click', async () => {
+        await this.logout();
+        // sem sessão → recarrega catálogo (volta para default)
+        await this.loadTemperoCatalog();
+        // limpa badges dependentes de cfg
+        this.robotCfg = []; this.robotCfgIndex = {}; this.state.roboLoaded = false;
+        this.handleListAll();
+      });
 
       this.els.authBox.append(hello, btnOut);
     } else {
@@ -194,7 +209,6 @@ class App {
       document.body.appendChild(dlg);
       this.authDlg = dlg;
 
-      // Confirmar
       dlg.querySelector('#authSubmit').addEventListener('click', async () => {
         const nome = dlg.querySelector('#authNome').value.trim();
         const senha = dlg.querySelector('#authSenha').value;
@@ -220,6 +234,7 @@ class App {
           }
           dlg.close();
           await this.refreshAuth();
+          await this.loadTemperoCatalog();
           if (this.user) { await this.loadRobotConfig(); }
           this.handleListAll();
         } catch (e) {
@@ -227,10 +242,8 @@ class App {
         }
       });
 
-      // Cancelar
       dlg.querySelector('#authCancel').addEventListener('click', () => dlg.close('cancel'));
 
-      // Enter = confirmar
       dlg.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter') {
           ev.preventDefault();
@@ -254,7 +267,6 @@ class App {
     this.user = null;
     this.renderAuthBox();
     this.toast('Sessão encerrada.', 'ok');
-    this.handleListAll();
   }
 
   // ================== Bindings ==================
@@ -297,8 +309,8 @@ class App {
     this.els.btnSalvarRobo.addEventListener('click', async () => {
       if (!this.ensureAuthOrPrompt()) return;
       await this.saveRobotConfig();
-      await this.loadRobotConfig(true); // recarrega índice
-      this.handleListAll();             // atualiza badges nos cards
+      await this.loadRobotConfig(true);
+      this.handleListAll();
     });
     this.els.btnRecarregarRobo.addEventListener('click', () => {
       if (!this.ensureAuthOrPrompt()) return;
@@ -418,6 +430,37 @@ class App {
     return window.confirm('Tem certeza que deseja excluir esta receita?');
   }
 
+  // ================== Catálogo de temperos ==================
+  async loadTemperoCatalog() {
+    try {
+      const data = await jfetch(`${API_URL}/catalogo/temperos`);
+      this.catalogoTemperos = Array.isArray(data) ? data : [];
+      this._renderCatalogToUI();
+    } catch (e) {
+      // falha: mantém catálogo anterior (ou vazio) — a receita continua permitindo texto livre
+    }
+  }
+
+  _renderCatalogToUI() {
+    // datalist para o formulário de receita
+    if (this.els.datalistTemperos) {
+      this.els.datalistTemperos.innerHTML = this.catalogoTemperos
+        .map(name => `<option value="${name}"></option>`).join('');
+    }
+    // selects da aba Robô
+    for (let i = 1; i <= 4; i++) {
+      const sel = this.els.roboFields[i].rotulo;
+      const current = sel.value || '';
+      sel.innerHTML = '';
+      sel.append(el('option', { value: '' }, '— Selecione —'));
+      for (const name of this.catalogoTemperos) {
+        sel.append(el('option', { value: name }, name));
+      }
+      // tenta restaurar seleção
+      if (current) sel.value = current;
+    }
+  }
+
   // ================== Ingredientes Dinâmicos ==================
   renderIngredientRow() {
     const rowCount = this.els.linhas.children.length;
@@ -426,43 +469,27 @@ class App {
       return;
     }
 
-    const row = document.createElement('div');
-    row.className = 'ingredient-row';
+    const row = el('div', { className: 'ingredient-row' });
 
-    const renderSelect = (options, attrs = {}) => {
-      const select = document.createElement('select');
-      Object.entries(attrs).forEach(([key, value]) => select.setAttribute(key, value));
-      options.forEach(opt => {
-        const option = document.createElement('option');
-        option.value = opt.value;
-        option.textContent = opt.label;
-        select.appendChild(option);
-      });
-      return select;
-    };
+    const temperoInput = el('input', {
+      type: 'text',
+      name: `tempero${rowCount + 1}`,
+      list: 'catTemperos',
+      autocomplete: 'off',
+      placeholder: 'Ex.: Sal, Pimenta, ...',
+    });
 
-    const renderInput = (type, attrs = {}) => {
-      const input = document.createElement('input');
-      input.type = type;
-      Object.entries(attrs).forEach(([key, value]) => input.setAttribute(key, value));
-      return input;
-    };
-
-    const temperoSelect = renderSelect(INGREDIENTS, { name: `tempero${rowCount + 1}` });
-    const quantidadeInput = renderInput('number', {
+    const quantidadeInput = el('input', {
+      type: 'number',
       name: `quantidade${rowCount + 1}`,
       min: '1',
       max: '500',
       step: '1',
       inputmode: 'numeric',
+      placeholder: 'Ex.: 10',
     });
 
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'ghost';
-    removeBtn.type = 'button';
-    removeBtn.textContent = 'Remover';
-    removeBtn.title = 'Remover linha';
-
+    const removeBtn = el('button', { className: 'ghost', type: 'button', title: 'Remover linha' }, 'Remover');
     removeBtn.addEventListener('click', () => {
       row.remove();
       this.renumberRows();
@@ -470,17 +497,13 @@ class App {
 
     const wrap = (label, element) => {
       const div = document.createElement('div');
-      const mobileLabel = document.createElement('span');
-      mobileLabel.className = 'mobile-label';
-      mobileLabel.textContent = label;
-      div.appendChild(mobileLabel);
-      div.appendChild(element);
+      div.append(el('span', { className: 'mobile-label' }, label), element);
       return div;
     };
 
-    row.appendChild(wrap('Tempero', temperoSelect));
-    row.appendChild(wrap('Quantidade', quantidadeInput));
-    row.appendChild(removeBtn);
+    row.append(wrap('Tempero', temperoInput));
+    row.append(wrap('Quantidade', quantidadeInput));
+    row.append(removeBtn);
 
     this.els.linhas.appendChild(row);
   }
@@ -489,7 +512,7 @@ class App {
     const rows = [...this.els.linhas.children];
     rows.forEach((row, i) => {
       const n = i + 1;
-      row.querySelector('select[name^="tempero"]').name = `tempero${n}`;
+      row.querySelector('input[name^="tempero"]').name = `tempero${n}`;
       row.querySelector('input[name^="quantidade"]').name = `quantidade${n}`;
     });
   }
@@ -515,7 +538,7 @@ class App {
     const rows = [...this.els.linhas.querySelectorAll('.ingredient-row')];
 
     for (const row of rows) {
-      const tempero = row.querySelector('select[name^="tempero"]').value;
+      const tempero = row.querySelector('input[name^="tempero"]').value.trim();
       const quantidade = row.querySelector('input[name^="quantidade"]').value;
 
       if (!tempero && !quantidade) continue;
@@ -528,6 +551,8 @@ class App {
       if (!Number.isInteger(numQuantidade) || numQuantidade < 1 || numQuantidade > 500) {
         throw new Error(`A quantidade de ${tempero} deve ser um número inteiro entre 1 e 500.`);
       }
+
+      if (tempero.length > 60) throw new Error('O nome do tempero deve ter até 60 caracteres.');
 
       ingredientes.push({ tempero, quantidade: numQuantidade });
     }
@@ -553,6 +578,8 @@ class App {
         body: JSON.stringify(payload),
       });
       this.toast('Receita salva com sucesso!', 'ok');
+      // receita pode ter criado novos temperos → atualiza catálogo
+      await this.loadTemperoCatalog();
       this.setModeCreate();
       this.selectTab('consultar');
       this.handleListAll();
@@ -575,6 +602,8 @@ class App {
         body: JSON.stringify(payload),
       });
       this.toast('Receita atualizada!', 'ok');
+      // pode ter criado novos temperos
+      await this.loadTemperoCatalog();
       this.setModeCreate();
       this.selectTab('consultar');
       this.handleListAll();
@@ -593,6 +622,7 @@ class App {
         this.setModeCreate();
         this.selectTab('consultar');
       }
+      // excluir pode ou não afetar catálogo; mantemos sem refresh por simplicidade
       this.handleListAll();
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
@@ -600,7 +630,7 @@ class App {
     }
   }
 
-  // ================== Consulta / Autocomplete ==================
+  // ================== Consulta / Autocomplete ao digitar ==================
   handleLiveInputDebounced() {
     clearTimeout(this._typeTimer);
     this._typeTimer = setTimeout(() => this.handleLiveInput(), TYPING_DEBOUNCE_MS);
@@ -682,7 +712,6 @@ class App {
       this.renderRecipeList(data);
     } catch (e) {
       if (e.status === 401) {
-        // sem sessão → mostra CTA para login
         this.renderRecipeList([]);
         this.toast('Entre para ver suas receitas.', 'err');
         return;
@@ -692,21 +721,19 @@ class App {
     }
   }
 
-  // ---------- Mapeamento dinâmico (rótulo -> frasco preferido) ----------
+  // ---------- Mapeamento dinâmico ----------
   _indexRobotCfg(items) {
     const idx = {};
     for (const it of items || []) {
       if (!it?.rotulo) continue;
       const key = String(it.rotulo).trim().toLowerCase();
-      if (!idx[key]) idx[key] = [];
-      idx[key].push(it);
+      (idx[key] ||= []).push(it);
     }
-    // ordena: preferir quem tem g/s definido; empate por frasco asc
     for (const key of Object.keys(idx)) {
       idx[key].sort((a, b) => {
         const ag = Number.isFinite(a.g_por_seg) ? a.g_por_seg : -1;
         const bg = Number.isFinite(b.g_por_seg) ? b.g_por_seg : -1;
-        if (ag !== bg) return bg - ag; // quem tem g/s primeiro
+        if (ag !== bg) return bg - ag;
         return a.frasco - b.frasco;
       });
     }
@@ -745,11 +772,7 @@ class App {
         gps: match.gps,
       });
     }
-    return {
-      mapped,
-      missingMap: Array.from(missingMap),
-      missingCal: Array.from(missingCal),
-    };
+    return { mapped, missingMap: Array.from(missingMap), missingCal: Array.from(missingCal) };
   }
 
   // ---------- helpers de UI do card ----------
@@ -757,7 +780,6 @@ class App {
     const li = document.createElement('li');
     li.className = 'ingredient-line';
 
-    // tenta resolver frasco pra mostrar badge
     const resolved = this.resolveReservoirFor(ing.tempero);
     if (resolved?.frasco) {
       const badge = document.createElement('span');
@@ -852,10 +874,10 @@ class App {
       itens.forEach((ing, idx) => {
         this.renderIngredientRow();
         const row = this.els.linhas.children[idx];
-        const temperoSelect = row.querySelector('select[name^="tempero"]');
+        const temperoInput = row.querySelector('input[name^="tempero"]');
         const quantidadeInput = row.querySelector('input[name^="quantidade"]');
 
-        temperoSelect.value = ing.tempero || '';
+        temperoInput.value = ing.tempero || '';
         quantidadeInput.value = String(ing.quantidade ?? '');
       });
 
@@ -873,7 +895,7 @@ class App {
     const arr = [];
     for (let i = 1; i <= 4; i++) {
       const f = this.els.roboFields[i];
-      const rotulo = f.rotulo.value.trim() || null;
+      const rotulo = (f.rotulo.value || '').trim() || null;
       const conteudo = f.conteudo.value.trim() || null;
       const gtxt = f.g.value.trim();
       const g = gtxt === '' ? null : Number(gtxt);
@@ -902,6 +924,9 @@ class App {
 
   async loadRobotConfig(forceToast = false) {
     try {
+      // garante que selects tenham opções
+      if (!this.catalogoTemperos.length) await this.loadTemperoCatalog();
+
       const data = await jfetch(`${API_URL}/config/robo`);
       this.robotCfg = Array.isArray(data) ? data : [];
       this.robotCfgIndex = this._indexRobotCfg(this.robotCfg);
@@ -925,7 +950,7 @@ class App {
       this.state.roboLoaded = false; // força recarga futura
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
-      this.toast(e.message || 'Falha ao salvar configuração', 'err');
+      this.toast(e?.data?.detail || e.message || 'Falha ao salvar configuração', 'err');
     }
   }
 
@@ -964,9 +989,7 @@ class App {
       document.body.appendChild(dlg);
       this.runDlg = dlg;
 
-      // binds estáticos
       dlg.querySelector('#runCancel').addEventListener('click', () => dlg.close('cancel'));
-      // quick buttons
       dlg.addEventListener('click', (ev) => {
         const btn = ev.target.closest('button[data-quick]');
         if (!btn) return;
@@ -976,18 +999,15 @@ class App {
         input.value = String(mult);
         this._renderRunPreview();
       });
-      // alterações do multiplicador
       dlg.querySelector('#runMult').addEventListener('input', () => this._renderRunPreview());
     }
 
-    // salva contexto atual pra preview/execução
     this._runCtx = { recipe, mapping };
     this.runDlg.querySelector('#runTitle').textContent = `Executar: ${recipe.nome}`;
     this.runDlg.querySelector('#runHint').textContent = '';
 
-    // (re)bind confirmar a cada abertura
     const confirmBtn = this.runDlg.querySelector('#runConfirm');
-    confirmBtn.replaceWith(confirmBtn.cloneNode(true)); // remove listeners antigos
+    confirmBtn.replaceWith(confirmBtn.cloneNode(true));
     const newConfirm = this.runDlg.querySelector('#runConfirm');
     newConfirm.addEventListener('click', async () => {
       const mult = Math.max(1, Math.min(99, Number(this.runDlg.querySelector('#runMult').value || 1)));
@@ -1008,7 +1028,6 @@ class App {
       }
     });
 
-    // renderiza preview e abre
     this._renderRunPreview();
     this.runDlg.showModal();
   }
@@ -1046,7 +1065,6 @@ class App {
       await this._ensureRobotLoaded();
       const recipe = await jfetch(`${API_URL}/receitas/${id}`);
 
-      // valida mapeamento no cliente para UX
       const mapping = this.resolveMapping(recipe.ingredientes || []);
       if (mapping.missingMap?.length) {
         this.toast(`Mapeamento ausente: ${mapping.missingMap.join(', ')}. Defina na aba Robô.`, 'err');
@@ -1057,7 +1075,6 @@ class App {
         return;
       }
 
-      // abre diálogo com multiplicador + preview
       this._openRunDialog(recipe, mapping);
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');

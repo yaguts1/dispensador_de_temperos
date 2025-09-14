@@ -7,6 +7,45 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="./Assets/pencil-svgrepo-com.svg" type="image/svg+xml" />
   <script defer src="app.js"></script>
+
+  <!-- Ajustes leves / ícones extras -->
+  <style>
+    .header-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .header-top { display: flex; align-items: center; gap: 10px; width: 100%; }
+    .auth-box { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .header-row .tabs { width: 100%; margin-top: 6px; }
+    @media (min-width: 720px) {
+      .header-top { gap: 16px; }
+      .header-row .tabs { margin-top: 10px; }
+    }
+
+    .icon-btn.primary { background: var(--success); color: #04120a; }
+    .icon-play{
+      background: currentColor;
+      -webkit-mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+              mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+    }
+
+    .robot-grid-header {
+      display: grid;
+      grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
+      gap: 8px;
+      margin: .4rem 0;
+    }
+    .robot-grid-header div{
+      font-size: .9rem; color:#e6ebff; background:#1a2870;
+      padding:8px; border-radius:10px; text-align:center;
+    }
+    .robot-row {
+      display: grid;
+      grid-template-columns: .7fr 1.1fr 1.1fr .7fr;
+      gap: 8px; align-items: center;
+    }
+    @media (max-width: 720px){
+      .robot-grid-header{ display:none; }
+      .robot-row{ grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
   <header class="site-header">
@@ -14,7 +53,6 @@
       <div class="header-row">
         <div class="header-top">
           <h1>Dispenser de Temperos</h1>
-          <!-- A caixa de login (.auth-box) é criada e injetada pelo app.js -->
         </div>
 
         <nav role="tablist" aria-label="Navegação do aplicativo" class="tabs">
@@ -24,6 +62,7 @@
           <button id="tab-montar" role="tab" aria-selected="false" aria-controls="pane-montar">
             Montar Receita
           </button>
+          <!-- ⬇️ Aba Robô com ícone -->
           <button id="tab-robo" role="tab" aria-selected="false" aria-controls="pane-robo" class="with-icon">
             <span class="icon icon-config" aria-hidden="true"></span>
             <span class="text">Robô</span>
@@ -54,7 +93,6 @@
         <div id="lista" class="recipe-list" aria-live="polite"></div>
       </div>
 
-      <!-- Template de card (referência visual) -->
       <template id="tpl-receita">
         <article class="recipe-item">
           <div class="card-actions">
@@ -114,6 +152,9 @@
             <div></div>
           </div>
 
+          <!-- cat. de temperos: sugestões no formulário (livre para digitar) -->
+          <datalist id="catTemperos"></datalist>
+
           <div id="linhas" class="grid-rows"></div>
 
           <div class="actions">
@@ -132,11 +173,11 @@
       <form id="formRobo" class="card">
         <fieldset>
           <legend>Configuração do Robô</legend>
-          <p class="hint">Mapeie o que há em cada reservatório e (opcionalmente) a calibração em gramas por segundo.</p>
+          <p class="hint">Mapeie o que há em cada reservatório. O <strong>Rótulo</strong> deve ser escolhido da lista de temperos (padrão + criados nas suas receitas).</p>
 
           <div class="robot-grid-header" aria-hidden="true">
             <div>Reservatório</div>
-            <div>Rótulo</div>
+            <div>Rótulo (da lista)</div>
             <div>Conteúdo</div>
             <div>g/s</div>
           </div>
@@ -147,7 +188,10 @@
               <div>
                 <span class="reservoir-badge r1"><span class="full">Reservatório 1</span><span class="short">R1</span></span>
               </div>
-              <div><span class="mobile-label">Rótulo</span><input id="r1_rotulo" autocomplete="off" placeholder="Ex.: Pimenta" /></div>
+              <div>
+                <span class="mobile-label">Rótulo</span>
+                <select id="r1_rotulo" class="robo-rotulo"></select>
+              </div>
               <div><span class="mobile-label">Conteúdo</span><input id="r1_conteudo" autocomplete="off" placeholder="Ex.: moída" /></div>
               <div><span class="mobile-label">g/s</span><input id="r1_gps" type="number" min="0" step="0.01" inputmode="decimal" placeholder="Ex.: 1.25" /></div>
             </div>
@@ -156,7 +200,10 @@
               <div>
                 <span class="reservoir-badge r2"><span class="full">Reservatório 2</span><span class="short">R2</span></span>
               </div>
-              <div><span class="mobile-label">Rótulo</span><input id="r2_rotulo" autocomplete="off" placeholder="Ex.: Sal" /></div>
+              <div>
+                <span class="mobile-label">Rótulo</span>
+                <select id="r2_rotulo" class="robo-rotulo"></select>
+              </div>
               <div><span class="mobile-label">Conteúdo</span><input id="r2_conteudo" autocomplete="off" /></div>
               <div><span class="mobile-label">g/s</span><input id="r2_gps" type="number" min="0" step="0.01" inputmode="decimal" /></div>
             </div>
@@ -165,7 +212,10 @@
               <div>
                 <span class="reservoir-badge r3"><span class="full">Reservatório 3</span><span class="short">R3</span></span>
               </div>
-              <div><span class="mobile-label">Rótulo</span><input id="r3_rotulo" autocomplete="off" /></div>
+              <div>
+                <span class="mobile-label">Rótulo</span>
+                <select id="r3_rotulo" class="robo-rotulo"></select>
+              </div>
               <div><span class="mobile-label">Conteúdo</span><input id="r3_conteudo" autocomplete="off" /></div>
               <div><span class="mobile-label">g/s</span><input id="r3_gps" type="number" min="0" step="0.01" inputmode="decimal" /></div>
             </div>
@@ -174,7 +224,10 @@
               <div>
                 <span class="reservoir-badge r4"><span class="full">Reservatório 4</span><span class="short">R4</span></span>
               </div>
-              <div><span class="mobile-label">Rótulo</span><input id="r4_rotulo" autocomplete="off" /></div>
+              <div>
+                <span class="mobile-label">Rótulo</span>
+                <select id="r4_rotulo" class="robo-rotulo"></select>
+              </div>
               <div><span class="mobile-label">Conteúdo</span><input id="r4_conteudo" autocomplete="off" /></div>
               <div><span class="mobile-label">g/s</span><input id="r4_gps" type="number" min="0" step="0.01" inputmode="decimal" /></div>
             </div>
@@ -189,7 +242,6 @@
     </section>
   </main>
 
-  <!-- Diálogo de confirmação de exclusão -->
   <dialog id="dlgExcluir">
     <form method="dialog" style="min-width: 280px">
       <p><strong>Excluir receita?</strong></p>
