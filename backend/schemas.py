@@ -129,6 +129,32 @@ class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ===== NOVOS SCHEMAS para offline-first execution =====
+class ExecutionLogEntry(BaseModel):
+    """Entrada no log de execução (per-frasco)"""
+    frasco: int = Field(..., ge=1, le=4)
+    tempero: str
+    quantidade_g: float
+    segundos: float
+    status: Literal["done", "failed"]  # executado com sucesso ou falhou
+    error: Optional[str] = None
+
+
+class JobCompleteIn(BaseModel):
+    """Payload recebido do ESP32 via POST /devices/me/jobs/{job_id}/complete"""
+    itens_completados: int = Field(..., ge=0)
+    itens_falhados: int = Field(..., ge=0)
+    execution_logs: List[ExecutionLogEntry]
+
+
+class JobCompleteOut(BaseModel):
+    """Resposta ao ESP32 confirmando recebimento"""
+    ok: bool
+    stock_deducted: bool  # se estoque foi abatido com sucesso
+    message: Optional[str] = None
+# ======================================================
+
+
 # =========================
 # Dispositivos (ESP32)
 # =========================

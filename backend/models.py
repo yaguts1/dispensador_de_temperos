@@ -135,6 +135,12 @@ class Job(Base):
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
 
+    # ===== NOVAS COLUNAS para offline-first model =====
+    itens_completados = Column(Integer, nullable=True)   # quantos itens completaram com sucesso
+    itens_falhados = Column(Integer, nullable=True)      # quantos falharam
+    execution_report = Column(Text, nullable=True)       # JSON array com log per-frasco
+    # =================================================
+
     # futuro: device_id/mac, logs etc.
     erro_msg = Column(String(255), nullable=True)
 

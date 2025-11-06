@@ -866,8 +866,11 @@ def device_next_job(
         db.commit()
         return Response(status_code=204)
 
-    job.status = "running"
-    job.started_at = now_utc()
+    # MUDANÇA: NÃO transiciona para "running" aqui
+    # O ESP32 vai reportar de forma offline-first
+    # Apenas marca started_at quando o job é retornado
+    if not job.started_at:
+        job.started_at = now_utc()
     db.commit()
     db.refresh(job)
     return job
@@ -926,6 +929,105 @@ def device_job_status(
 
     db.commit()
     return {"ok": True}
+
+
+@app.post("/devices/me/jobs/{job_id}/complete", response_model=schemas.JobCompleteOut)
+def device_job_complete(
+    job_id: int,
+    payload: schemas.JobCompleteIn,
+    dev: models.Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint para ESP32 reportar execução offline com relatório completo.
+    
+    - ESP32 executa localmente (com WiFi OFF se necessário)
+    - Ao reconectar, envia /devices/me/jobs/{job_id}/complete com logs
+    - Backend valida, abate estoque apenas itens com status="done"
+    - Oferece proteção contra duplicatas via idempotência
+    """
+    dev.last_seen = now_utc()
+    
+    job = (
+        db.query(models.Job)
+        .options(selectinload(models.Job.itens), selectinload(models.Job.receita))
+        .filter(models.Job.id == job_id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado.")
+
+    # garante que o job é do mesmo usuário do dispositivo
+    dono_id = job.receita.dono_id if job.receita else job.user_id
+    if dono_id != dev.user_id:
+        raise HTTPException(status_code=403, detail="Job não pertence a este usuário/dispositivo.")
+
+    # Idempotência: se já foi completado, retorna ok sem duplicar
+    if job.status in ("done", "done_partial", "failed"):
+        return schemas.JobCompleteOut(
+            ok=True,
+            stock_deducted=True,  # já foi abatido antes
+            message="Job já foi completado anteriormente"
+        )
+
+    now = now_utc()
+    job.itens_completados = payload.itens_completados
+    job.itens_falhados = payload.itens_falhados
+    job.finished_at = now
+    
+    # Salva relatório de execução (JSON)
+    import json
+    job.execution_report = json.dumps([
+        {
+            "frasco": log.frasco,
+            "tempero": log.tempero,
+            "quantidade_g": log.quantidade_g,
+            "segundos": log.segundos,
+            "status": log.status,
+            "error": log.error,
+        }
+        for log in payload.execution_logs
+    ])
+
+    # Define status final
+    if payload.itens_falhados > 0:
+        job.status = "done_partial"  # alguns falharam
+    else:
+        job.status = "done"  # tudo ok
+
+    # ABATE ESTOQUE (apenas aqui, após confirmação de execução)
+    stock_deducted = True
+    try:
+        consumo_por_frasco = {}
+        # Percorre logs bem-sucedidos apenas
+        for log in payload.execution_logs:
+            if log.status == "done":
+                frasco = log.frasco
+                consumo_por_frasco[frasco] = consumo_por_frasco.get(frasco, 0.0) + float(log.quantidade_g or 0)
+        
+        for frasco, total_g in consumo_por_frasco.items():
+            cfg = (
+                db.query(models.ReservatorioConfig)
+                .filter(
+                    models.ReservatorioConfig.user_id == dev.user_id,
+                    models.ReservatorioConfig.frasco == frasco,
+                )
+                .first()
+            )
+            if cfg and cfg.estoque_g is not None:
+                cfg.estoque_g = max(0.0, float(cfg.estoque_g) - float(total_g))
+    except Exception as e:
+        stock_deducted = False
+        job.erro_msg = f"Falha ao abater estoque: {str(e)}"
+        print(f"[ERROR] Falha ao abater estoque para job {job_id}: {e}")
+
+    db.commit()
+    
+    return schemas.JobCompleteOut(
+        ok=True,
+        stock_deducted=stock_deducted,
+        message="Job completado e estoque abatido" if stock_deducted else "Job registrado, mas houve erro ao abater estoque"
+    )
 
 # ---------------------------------------------------------------------
 # Utilitários: devices do usuário e controle do job ativo
