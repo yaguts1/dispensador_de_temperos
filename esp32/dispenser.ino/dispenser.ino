@@ -8,6 +8,7 @@
 
 #include <Arduino.h>
 #include "yaguts_types.h"   // struct ApiEndpoint { String host; uint16_t port; bool https; }
+#include "job_persistence.h" // Persistência de jobs em Flash (offline-first)
 
 #include <WiFi.h>
 #include <WebServer.h>
@@ -69,6 +70,12 @@ String st_ssid, st_pass, st_token, st_api, st_claim;
 // ---------- Estado ----------
 enum RunState { ST_CONFIG_PORTAL, ST_WIFI_CONNECT, ST_ONLINE };
 RunState state = ST_WIFI_CONNECT;
+
+// ---------- Job em Execução (offline-first) ----------
+// Variáveis globais serão definidas em job_execution.ino
+extern JobState g_currentJob;
+extern StaticJsonDocument<2048> g_executionLog;
+extern unsigned long g_lastReportAttempt;
 
 // ---------- Relógios ----------
 unsigned long lastHeartbeat = 0;
@@ -445,9 +452,40 @@ bool pollNextJob() {
   if (code == 401) { prefs.begin("yaguts", false); prefs.remove("device_token"); prefs.end(); st_token = ""; return false; }
   if (code == 204) { Serial.println("[POLL] 204 (sem job)"); fails = 0; return false; }
   if (code == 200 && out.length() > 0) {
-    fails = 0; Serial.println("[JOB] Recebido:"); Serial.println(out);
-    bool ok = executeJob(out);
-    if (!ok) { StaticJsonDocument<512> d; if (!deserializeJson(d, out)) { int jid = d["id"] | 0; if (jid) postJobStatus(jid, "error", "execucao falhou"); } }
+    fails = 0; 
+    Serial.println("[POLL] ✓ Job recebido!");
+    Serial.println(out);
+    
+    // ===== NOVO: Salvar em Flash ANTES de executar (offline-first) =====
+    StaticJsonDocument<4096> doc;
+    if (!deserializeJson(doc, out)) {
+      g_currentJob.jobId = doc["id"] | 0;
+      g_currentJob.totalItens = doc["itens"].size();
+      g_currentJob.itensConcluidos = 0;
+      g_currentJob.itensFalhados = 0;
+      g_currentJob.timestampInicio = millis();
+      
+      // Salva JSON completo em string
+      String jsonStr;
+      serializeJson(doc, jsonStr);
+      strncpy(g_currentJob.jsonPayload, jsonStr.c_str(), sizeof(g_currentJob.jsonPayload) - 1);
+      g_currentJob.logPayload[0] = '\0';  // Log vazio inicialmente
+      
+      // Persiste em Flash
+      saveJob(g_currentJob);
+      Serial.printf("[POLL] Job %d salvo em Flash para execução offline\n", g_currentJob.jobId);
+    }
+    
+    // ===== NOVO: Executar localmente (online ou offline após isto) =====
+    bool execOk = executeJobOfflineWithPersistence();
+    
+    // ===== NOVO: Reportar ao backend (idempotência se falhar) =====
+    bool reportOk = reportJobCompletion();
+    
+    if (!execOk || !reportOk) {
+      Serial.printf("[POLL] Execução OK: %d, Report OK: %d (vai retry)\n", execOk, reportOk);
+    }
+    
     return true;
   }
   Serial.printf("[POLL] HTTP %d\n", code); fails = 0; return false;
@@ -479,6 +517,11 @@ void setup() {
 
   setupPins();
   loadPrefs();
+
+  // ===== NOVO: Tentar retomar job anterior (offline-first recovery) =====
+  if (tryResumeJobFromFlash()) {
+    Serial.println("[SETUP] Job anterior detectado, será retomado ao conectar");
+  }
 
   // Só registra handlers aqui; NÃO inicia server ainda!
   setupHttpHandlers();
@@ -519,6 +562,14 @@ void loop() {
         break;
       }
       unsigned long now = millis();
+      
+      // ===== NOVO: Retry de report se job pendente =====
+      if (g_currentJob.jobId && now - g_lastReportAttempt >= REPORT_RETRY_INTERVAL) {
+        Serial.println("[LOOP] Tentando reportar job pendente...");
+        reportJobCompletion();
+        g_lastReportAttempt = now;
+      }
+      
       if (now - lastHeartbeat >= HEARTBEAT_EVERY_MS) { sendHeartbeat(); lastHeartbeat = now; }
       if (now - lastPoll >= JOB_POLL_MS)            { pollNextJob();  lastPoll = now; }
       delay(10);
