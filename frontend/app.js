@@ -5,6 +5,89 @@ const API_URL = 'https://api.yaguts.com.br';
 const AUTOCOMPLETE_MIN_CHARS = 1;
 const TYPING_DEBOUNCE_MS = 200;
 
+// =====================================================================
+// WebSocket Monitor para observabilidade em tempo real
+// =====================================================================
+class JobExecutionMonitor {
+  constructor(job_id, api_base_url = 'https://api.yaguts.com.br') {
+    this.job_id = job_id;
+    this.api_base_url = api_base_url;
+    this.ws = null;
+    this.execution_logs = [];
+    this.callbacks = {
+      onLogEntry: null,      // (entry) => {}
+      onCompletion: null,    // (result) => {}
+      onError: null,         // (error) => {}
+      onConnectionChange: null, // (connected: bool) => {}
+    };
+  }
+
+  connect() {
+    const proto = this.api_base_url.startsWith('https') ? 'wss' : 'ws';
+    const host = this.api_base_url.replace(/^https?:\/\//, '');
+    const url = `${proto}://${host}/ws/jobs/${this.job_id}`;
+    
+    console.log(`[JobMonitor] Conectando a ${url}`);
+    
+    this.ws = new WebSocket(url);
+    
+    this.ws.onopen = () => {
+      console.log(`[JobMonitor] WebSocket conectado para job ${this.job_id}`);
+      this.callbacks.onConnectionChange?.(true);
+      // Heartbeat a cada 30s
+      this._heartbeatInterval = setInterval(() => {
+        if (this.ws?.readyState === WebSocket.OPEN) {
+          this.ws.send('ping');
+        }
+      }, 30000);
+    };
+    
+    this.ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        
+        if (msg.type === 'execution_log_entry') {
+          console.log(`[JobMonitor] Log entry:`, msg.data);
+          this.execution_logs.push(msg.data);
+          this.callbacks.onLogEntry?.(msg.data);
+        } else if (msg.type === 'execution_complete') {
+          console.log(`[JobMonitor] Execução concluída:`, msg.data);
+          this.callbacks.onCompletion?.(msg.data);
+          this.close();
+        } else if (msg.type === 'pong') {
+          // Heartbeat response, ignore
+        }
+      } catch (e) {
+        console.error(`[JobMonitor] Erro ao processar mensagem:`, e);
+        this.callbacks.onError?.(e);
+      }
+    };
+    
+    this.ws.onerror = (event) => {
+      console.error(`[JobMonitor] WebSocket erro:`, event);
+      this.callbacks.onError?.(event);
+    };
+    
+    this.ws.onclose = () => {
+      console.log(`[JobMonitor] WebSocket fechado`);
+      clearInterval(this._heartbeatInterval);
+      this.callbacks.onConnectionChange?.(false);
+    };
+  }
+
+  close() {
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+    clearInterval(this._heartbeatInterval);
+  }
+
+  isConnected() {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+}
+
 // -------- fetch helper (com cookies + tratamento de erro) --------
 async function jfetch(url, opts = {}) {
   const resp = await fetch(url, {
@@ -1047,7 +1130,15 @@ class App {
           method: 'POST',
           body: JSON.stringify({ receita_id: recipe.id, multiplicador: mult }),
         });
+        
+        const job_id = data.id;
+        console.log(`[App] Job criado: ${job_id}`);
+        
         this.toast(data?.detail || 'Receita enviada ao robô!', 'ok');
+        
+        // **NOVO**: Conecta WebSocket para monitorar execução em tempo real
+        this._monitorJobExecution(job_id, hint);
+        
         this.runDlg.close('ok');
       } catch (e) {
         const msg = e?.data?.detail || e.message || 'Falha ao iniciar execução';
@@ -1143,6 +1234,103 @@ class App {
     } finally {
       if (btnEl) btnEl.disabled = false;
     }
+  }
+
+  // =====================================================================
+  // **NOVO**: Monitoramento em tempo real de execução via WebSocket
+  // =====================================================================
+  _monitorJobExecution(job_id, hintEl) {
+    const monitor = new JobExecutionMonitor(job_id, API_URL);
+    
+    // Cria um dialog para mostrar progresso
+    const progressDlg = document.createElement('dialog');
+    progressDlg.className = 'card';
+    progressDlg.style.cssText = 'min-width: 400px; max-height: 80vh; overflow-y: auto;';
+    progressDlg.id = `job-progress-${job_id}`;
+    
+    const header = document.createElement('div');
+    header.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0;">Executando Job #${job_id}</h3>
+        <button type="button" class="ghost" data-action="close" aria-label="Fechar">×</button>
+      </div>
+    `;
+    
+    const progressLog = document.createElement('div');
+    progressLog.id = `progress-log-${job_id}`;
+    progressLog.style.cssText = 'border: 1px solid #ccc; border-radius: 8px; padding: 12px; background: #f9f9f9; font-family: monospace; font-size: 0.9em; max-height: 50vh; overflow-y: auto;';
+    
+    const statusBar = document.createElement('div');
+    statusBar.id = `status-bar-${job_id}`;
+    statusBar.style.cssText = 'margin-top: 16px; padding: 12px; background: #e8f5e9; border-radius: 8px;';
+    statusBar.innerHTML = 'Conectando ao monitor de execução...';
+    
+    progressDlg.append(header, progressLog, statusBar);
+    
+    // Callbacks do monitor
+    monitor.callbacks.onLogEntry = (entry) => {
+      const statusColor = entry.status === 'done' ? '#4caf50' : '#f44336';
+      const statusText = entry.status === 'done' ? '✅ OK' : '❌ FALHA';
+      const errorMsg = entry.error ? ` (${entry.error})` : '';
+      
+      const line = document.createElement('div');
+      line.style.color = statusColor;
+      line.textContent = `Frasco ${entry.frasco}: ${entry.tempero} - ${entry.quantidade_g}g em ${entry.segundos.toFixed(1)}s ${statusText}${errorMsg}`;
+      progressLog.appendChild(line);
+      progressLog.scrollTop = progressLog.scrollHeight;
+    };
+    
+    monitor.callbacks.onCompletion = (result) => {
+      console.log('[App] Execução concluída:', result);
+      
+      const completedCount = result.itens_completados || 0;
+      const failedCount = result.itens_falhados || 0;
+      const jobStatus = result.job_status || 'unknown';
+      
+      let finalMsg = `✅ Job concluído! ${completedCount} OK`;
+      if (failedCount > 0) {
+        finalMsg += `, ${failedCount} FALHAS`;
+      }
+      
+      if (result.stock_deducted) {
+        finalMsg += ' | Estoque abatido';
+      }
+      
+      statusBar.style.background = failedCount === 0 ? '#e8f5e9' : '#fff3e0';
+      statusBar.innerHTML = finalMsg;
+      
+      // Fecha dialog após 5s
+      setTimeout(() => progressDlg.close(), 5000);
+    };
+    
+    monitor.callbacks.onError = (error) => {
+      console.error('[App] Erro na execução:', error);
+      statusBar.style.background = '#ffebee';
+      statusBar.innerHTML = `❌ Erro: ${error.message || 'Desconexão inesperada'}`;
+    };
+    
+    monitor.callbacks.onConnectionChange = (connected) => {
+      if (connected) {
+        statusBar.innerHTML = '🔗 Conectado, aguardando execução do ESP32...';
+        statusBar.style.background = '#e3f2fd';
+      } else {
+        statusBar.innerHTML = '⚠️ Desconectado do monitor';
+        statusBar.style.background = '#fff3e0';
+      }
+    };
+    
+    // Botão fechar
+    header.querySelector('[data-action="close"]').addEventListener('click', () => {
+      monitor.close();
+      progressDlg.close();
+    });
+    
+    // Mostra dialog
+    document.body.appendChild(progressDlg);
+    progressDlg.showModal();
+    
+    // Conecta ao WebSocket
+    monitor.connect();
   }
 }
 

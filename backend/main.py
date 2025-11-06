@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Depends, HTTPException, Form, Query, Response, Request, Header
+from fastapi import FastAPI, Depends, HTTPException, Form, Query, Response, Request, Header, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, selectinload
 from passlib.hash import bcrypt
-from typing import Optional, List, Iterable, Tuple, Dict
+from typing import Optional, List, Iterable, Tuple, Dict, Set
 from starlette import status
 from sqlalchemy import func
 from jose import jwt, JWTError
@@ -11,6 +11,8 @@ from datetime import datetime, timedelta, timezone
 import os
 import json
 from random import randint
+import asyncio
+from collections import defaultdict
 
 from . import models, schemas, database
 
@@ -53,6 +55,74 @@ DEFAULT_TEMPEROS = [
     "Orégano",
     "Cominho",
 ]
+
+# =====================================================================
+# WebSocket Manager para broadcast de execution_logs em tempo real
+# =====================================================================
+class JobExecutionManager:
+    """
+    Gerencia conexões WebSocket para monitorar execução de jobs.
+    Permite múltiplos clientes conectarem a um job_id e receberem updates em tempo real.
+    """
+    def __init__(self):
+        self.job_connections: Dict[int, Set[WebSocket]] = defaultdict(set)  # job_id -> set de WebSockets
+    
+    async def connect(self, job_id: int, ws: WebSocket):
+        await ws.accept()
+        self.job_connections[job_id].add(ws)
+        print(f"[WS] Cliente conectado ao job {job_id}. Total: {len(self.job_connections[job_id])}")
+    
+    async def disconnect(self, job_id: int, ws: WebSocket):
+        if ws in self.job_connections[job_id]:
+            self.job_connections[job_id].discard(ws)
+            print(f"[WS] Cliente desconectado do job {job_id}. Restantes: {len(self.job_connections[job_id])}")
+            if not self.job_connections[job_id]:
+                del self.job_connections[job_id]
+    
+    async def broadcast_log_entry(self, job_id: int, entry: dict):
+        """Envia um log entry para todos os clientes conectados a este job."""
+        if job_id not in self.job_connections:
+            return
+        
+        disconnected = []
+        for ws in self.job_connections[job_id]:
+            try:
+                await ws.send_json({
+                    "type": "execution_log_entry",
+                    "data": entry,
+                    "timestamp": iso_utc(now_utc()),
+                })
+            except Exception as e:
+                print(f"[WS] Erro ao enviar para job {job_id}: {e}")
+                disconnected.append(ws)
+        
+        # Remove clientes desconectados
+        for ws in disconnected:
+            await self.disconnect(job_id, ws)
+    
+    async def broadcast_completion(self, job_id: int, result: dict):
+        """Notifica todos os clientes que a execução terminou."""
+        if job_id not in self.job_connections:
+            return
+        
+        disconnected = []
+        for ws in self.job_connections[job_id]:
+            try:
+                await ws.send_json({
+                    "type": "execution_complete",
+                    "data": result,
+                    "timestamp": iso_utc(now_utc()),
+                })
+                await ws.close(code=1000, reason="Job completed")
+            except Exception as e:
+                print(f"[WS] Erro ao notificar conclusão (job {job_id}): {e}")
+                disconnected.append(ws)
+        
+        # Limpa
+        if job_id in self.job_connections:
+            del self.job_connections[job_id]
+
+job_exec_manager = JobExecutionManager()
 
 # ---------------------------------------------------------------------
 # Utilidades de data/hora (UTC consistente)
@@ -945,7 +1015,10 @@ def device_job_complete(
     - Ao reconectar, envia /devices/me/jobs/{job_id}/complete com logs
     - Backend valida, abate estoque apenas itens com status="done"
     - Oferece proteção contra duplicatas via idempotência
+    - **NOVO**: Faz broadcast dos logs para clientes WebSocket conectados
     """
+    import asyncio
+    
     dev.last_seen = now_utc()
     
     job = (
@@ -1022,6 +1095,33 @@ def device_job_complete(
         print(f"[ERROR] Falha ao abater estoque para job {job_id}: {e}")
 
     db.commit()
+    
+    # Faz broadcast de cada log entry para clientes WebSocket conectados
+    # (assíncrono em background, não bloqueia a resposta)
+    async def _broadcast_logs():
+        for log in payload.execution_logs:
+            await job_exec_manager.broadcast_log_entry(job_id, {
+                "frasco": log.frasco,
+                "tempero": log.tempero,
+                "quantidade_g": log.quantidade_g,
+                "segundos": log.segundos,
+                "status": log.status,
+                "error": log.error,
+            })
+        # Notifica conclusão
+        await job_exec_manager.broadcast_completion(job_id, {
+            "ok": True,
+            "stock_deducted": stock_deducted,
+            "itens_completados": job.itens_completados,
+            "itens_falhados": job.itens_falhados,
+            "job_status": job.status,
+        })
+    
+    # Inicia em background (fire-and-forget)
+    try:
+        asyncio.create_task(_broadcast_logs())
+    except Exception as e:
+        print(f"[WARN] Falha ao fazer broadcast WS para job {job_id}: {e}")
     
     return schemas.JobCompleteOut(
         ok=True,
@@ -1101,3 +1201,126 @@ def cancel_active_job(
         count += 1
     db.commit()
     return {"ok": True, "cancelled": count}
+
+
+# =====================================================================
+# WebSocket: Monitorar execução de jobs em tempo real
+# =====================================================================
+@app.websocket("/ws/jobs/{job_id}")
+async def websocket_job_monitor(
+    websocket: WebSocket,
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: Optional[models.Usuario] = Depends(get_optional_user),
+):
+    """
+    WebSocket para monitorar execução de job em tempo real.
+    
+    O cliente (frontend) conecta e recebe updates:
+    - { type: "execution_log_entry", data: {frasco, status, ms, error}, timestamp }
+    - { type: "execution_complete", data: {ok, stock_deducted, itens_completados, ...}, timestamp }
+    
+    Autenticação: Usa get_optional_user (pode ser anônimo, validação via job ownership)
+    """
+    # Valida que o job existe
+    job = db.query(models.Job).filter(models.Job.id == job_id).first()
+    if not job:
+        await websocket.close(code=4004, reason="Job not found")
+        return
+    
+    # Se user logado, valida propriedade do job
+    if current_user:
+        dono_id = job.receita.dono_id if job.receita else job.user_id
+        if dono_id != current_user.id:
+            await websocket.close(code=4003, reason="Job not owned by this user")
+            return
+    
+    # Conecta ao manager
+    await job_exec_manager.connect(job_id, websocket)
+    
+    try:
+        # Mantém conexão aberta, aguardando heartbeat/ping
+        while True:
+            data = await websocket.receive_text()
+            if data and data.strip().lower() == "ping":
+                await websocket.send_json({"type": "pong"})
+    except WebSocketDisconnect:
+        await job_exec_manager.disconnect(job_id, websocket)
+    except Exception as e:
+        print(f"[WS ERROR] job {job_id}: {e}")
+        await job_exec_manager.disconnect(job_id, websocket)
+
+
+# =====================================================================
+# TESTING: Mock ESP32 Execution Simulator
+# =====================================================================
+@app.post("/devices/test/simulate-execution")
+async def test_simulate_esp32_execution(
+    request_body: dict,
+    db: Session = Depends(get_db),
+):
+    """
+    Endpoint de teste: Simula execução do ESP32 com delays e falhas injetáveis.
+    
+    APENAS PARA DESENVOLVIMENTO! Remove em produção.
+    
+    Payload:
+    {
+      "job_id": 123,
+      "frasco_delay_ms": 2000,
+      "fail_frasco_indices": [1, 3],     # quais frascos falham (0-indexed)
+      "simulate_wifi_drop": true,        # WiFi cai no meio?
+      "drop_at_frasco_index": 1,
+      "drop_duration_seconds": 5
+    }
+    """
+    from . import mock_esp32
+    
+    job_id = request_body.get("job_id")
+    if not job_id:
+        raise HTTPException(status_code=400, detail="job_id requerido")
+    
+    # Busca job
+    job = db.query(models.Job).options(selectinload(models.Job.itens)).filter(models.Job.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job não encontrado")
+    
+    if job.status not in ("queued", "running"):
+        raise HTTPException(status_code=400, detail=f"Job está em status {job.status}")
+    
+    # Prepara itens para simulação
+    job_items = [
+        {
+            "frasco": item.frasco,
+            "tempero": item.tempero,
+            "quantidade_g": item.quantidade_g,
+        }
+        for item in job.itens
+    ]
+    
+    # Extrai parâmetros
+    frasco_delay_ms = request_body.get("frasco_delay_ms", 2000)
+    fail_indices = request_body.get("fail_frasco_indices", [])
+    simulate_wifi = request_body.get("simulate_wifi_drop", False)
+    drop_at = request_body.get("drop_at_frasco_index", 0)
+    drop_duration = request_body.get("drop_duration_seconds", 5)
+    
+    # Executa simulação
+    payload = await mock_esp32.simulate_esp32_execution(
+        job_id=job_id,
+        job_itens=job_items,
+        device_id=1,
+        frasco_delay_ms=frasco_delay_ms,
+        fail_frasco_indices=fail_indices,
+        simulate_wifi_drop=simulate_wifi,
+        drop_at_frasco_index=drop_at,
+        drop_duration_seconds=drop_duration,
+    )
+    
+    return {
+        "ok": True,
+        "simulated_payload": payload,
+        "note": "Payload simulado. Em produção, ESP32 faria POST /devices/me/jobs/{id}/complete"
+    }
+
+
