@@ -49,7 +49,7 @@ bool servoInitOk = false;
 #define API_PORT_HTTP        80
 
 // TLS
-#define USE_INSECURE_TLS     1      // DEV: 1. Produção: 0 + root CA
+#define USE_INSECURE_TLS     0      // DEV: 1. Produção: 0 + root CA
 static const char *LE_ISRG_ROOT_X1 =
 "-----BEGIN CERTIFICATE-----\n"
 "MIIFazCCA1OgAwIBAgISA6Z5...TRUNCATED_FOR_BREVITY...\n"

@@ -1,7 +1,7 @@
 // ================== Configurações ==================
-//const API_URL = 'https://api.yaguts.com.br';
-
-const API_URL = 'http://localhost:8000';
+// Detectar automaticamente se dev ou produção
+const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const API_URL = isDev ? 'http://localhost:8000' : 'https://api.yaguts.com.br';
 
 // Busca ao digitar
 const AUTOCOMPLETE_MIN_CHARS = 1;
@@ -11,7 +11,7 @@ const TYPING_DEBOUNCE_MS = 200;
 // WebSocket Monitor para observabilidade em tempo real
 // =====================================================================
 class JobExecutionMonitor {
-  constructor(job_id, api_base_url = 'https://api.yaguts.com.br') {
+  constructor(job_id, api_base_url = API_URL) {
     this.job_id = job_id;
     this.api_base_url = api_base_url;
     this.ws = null;
