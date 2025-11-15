@@ -1,0 +1,38 @@
+# Dependencies
+venv/
+.venv/
+env/
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.egg/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# No documentation files
+*.md
+!LICENSE
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.exe
+*.bin
+*.elf
+
+# Temporary files
+*.tmp
+tmp/
+temp/
