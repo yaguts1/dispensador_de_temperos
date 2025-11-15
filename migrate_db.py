@@ -1,13 +1,24 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Script de Migração de Banco de Dados
-Atualiza schema do banco antigo para o novo (com colunas de offline-first)
+Script de migração para adicionar colunas porcoes e pessoas_solicitadas
+Uso: python migrate_db.py
 """
-
 import os
-import sqlite3
+import sys
 import shutil
+from pathlib import Path
 from datetime import datetime
+
+# Adiciona o diretório pai ao path para importar módulos do backend
+sys.path.insert(0, str(Path(__file__).parent))
+
+try:
+    from sqlalchemy import text
+    from backend.database import engine
+    HAS_SQLALCHEMY = True
+except ImportError:
+    HAS_SQLALCHEMY = False
+    import sqlite3
 
 DB_PATH = "dispenser.db"
 BACKUP_PATH = f"dispenser.db.backup.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -20,129 +31,117 @@ def backup_database():
         return True
     return False
 
-def migrate_jobs_table():
-    """Adiciona colunas faltantes na tabela jobs"""
+def run_migration_sqlalchemy():
+    """Executa migration usando SQLAlchemy (PostgreSQL/SQLite)"""
+    migration_sql = """
+    -- Adicionar coluna porcoes na tabela receitas
+    ALTER TABLE receitas 
+    ADD COLUMN IF NOT EXISTS porcoes INTEGER NOT NULL DEFAULT 1;
+    
+    -- Adicionar coluna pessoas_solicitadas na tabela jobs
+    ALTER TABLE jobs 
+    ADD COLUMN IF NOT EXISTS pessoas_solicitadas INTEGER NOT NULL DEFAULT 1;
+    
+    -- Migrar dados existentes
+    UPDATE jobs 
+    SET pessoas_solicitadas = multiplicador 
+    WHERE pessoas_solicitadas = 1 AND multiplicador > 1;
+    """
+    
+    try:
+        with engine.connect() as conn:
+            statements = [s.strip() for s in migration_sql.split(';') if s.strip() and not s.strip().startswith('--')]
+            
+            for stmt in statements:
+                if stmt:
+                    print(f"  Executando: {stmt[:60]}...")
+                    conn.execute(text(stmt))
+                    conn.commit()
+        
+        print("✅ Migration executada com sucesso!")
+        return True
+    except Exception as e:
+        print(f"❌ Erro ao executar migration: {e}")
+        return False
+
+def run_migration_sqlite():
+    """Executa migration usando sqlite3 direto"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     try:
-        # Verifica se coluna já existe
+        # Verifica colunas existentes
+        cursor.execute("PRAGMA table_info(receitas)")
+        receitas_cols = [col[1] for col in cursor.fetchall()]
+        
         cursor.execute("PRAGMA table_info(jobs)")
-        columns = [col[1] for col in cursor.fetchall()]
+        jobs_cols = [col[1] for col in cursor.fetchall()]
         
-        print(f"Colunas atuais em 'jobs': {columns}")
+        # Adiciona porcoes se não existir
+        if 'porcoes' not in receitas_cols:
+            print("  Adicionando coluna 'porcoes' em receitas...")
+            cursor.execute("ALTER TABLE receitas ADD COLUMN porcoes INTEGER NOT NULL DEFAULT 1")
+            print("✅ Coluna 'porcoes' adicionada")
+        else:
+            print("⚠️  Coluna 'porcoes' já existe")
         
-        # Adiciona colunas faltantes
-        if 'itens_completados' not in columns:
-            print("Adicionando coluna 'itens_completados'...")
-            cursor.execute("ALTER TABLE jobs ADD COLUMN itens_completados INTEGER DEFAULT NULL")
-            print("✅ Coluna 'itens_completados' adicionada")
+        # Adiciona pessoas_solicitadas se não existir
+        if 'pessoas_solicitadas' not in jobs_cols:
+            print("  Adicionando coluna 'pessoas_solicitadas' em jobs...")
+            cursor.execute("ALTER TABLE jobs ADD COLUMN pessoas_solicitadas INTEGER NOT NULL DEFAULT 1")
+            print("✅ Coluna 'pessoas_solicitadas' adicionada")
+        else:
+            print("⚠️  Coluna 'pessoas_solicitadas' já existe")
         
-        if 'itens_falhados' not in columns:
-            print("Adicionando coluna 'itens_falhados'...")
-            cursor.execute("ALTER TABLE jobs ADD COLUMN itens_falhados INTEGER DEFAULT NULL")
-            print("✅ Coluna 'itens_falhados' adicionada")
-        
-        if 'execution_report' not in columns:
-            print("Adicionando coluna 'execution_report'...")
-            cursor.execute("ALTER TABLE jobs ADD COLUMN execution_report TEXT DEFAULT NULL")
-            print("✅ Coluna 'execution_report' adicionada")
+        # Migra dados
+        print("  Migrando dados: multiplicador → pessoas_solicitadas...")
+        cursor.execute("""
+            UPDATE jobs 
+            SET pessoas_solicitadas = multiplicador 
+            WHERE pessoas_solicitadas = 1 AND multiplicador > 1
+        """)
         
         conn.commit()
-        print("\n✅ Migração concluída com sucesso!")
+        print("✅ Migration SQLite concluída com sucesso!")
         return True
         
-    except sqlite3.Error as e:
+    except Exception as e:
         print(f"❌ Erro durante migração: {e}")
         conn.rollback()
         return False
     finally:
         conn.close()
 
-def check_database():
-    """Verifica o estado atual do banco"""
-    if not os.path.exists(DB_PATH):
-        print(f"⚠️  Banco de dados não encontrado: {DB_PATH}")
-        return False
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-        tables = cursor.fetchall()
-        print(f"📊 Tabelas encontradas: {[t[0] for t in tables]}")
-        
-        if tables:
-            cursor.execute("PRAGMA table_info(jobs)")
-            columns = cursor.fetchall()
-            print(f"\n📋 Schema da tabela 'jobs':")
-            for col in columns:
-                print(f"   - {col[1]} ({col[2]})")
-        
-        return True
-        
-    except sqlite3.Error as e:
-        print(f"❌ Erro ao verificar banco: {e}")
-        return False
-    finally:
-        conn.close()
-
-def delete_and_recreate():
-    """Opção nuclear: deleta banco antigo e deixa o código criar novo"""
-    if os.path.exists(DB_PATH):
-        os.remove(DB_PATH)
-        print(f"✅ Banco de dados deletado: {DB_PATH}")
-        print("⚠️  Todos os dados foram perdidos!")
-        print("✅ Execute o backend novamente para criar novo banco")
-        return True
-    return False
-
 if __name__ == "__main__":
     print("=" * 60)
-    print("🔧 MIGRAÇÃO DE BANCO DE DADOS - YAGUTS DISPENSER")
+    print("  MIGRATION: Porções e Escalamento")
     print("=" * 60)
+    print("\n📊 Mudanças que serão aplicadas:")
+    print("  - receitas.porcoes (INTEGER, default=1)")
+    print("  - jobs.pessoas_solicitadas (INTEGER, default=1)")
+    print("  - Migração de dados: multiplicador → pessoas_solicitadas")
+    print("\n")
     
-    # 1. Verificar estado atual
-    print("\n1️⃣  Verificando banco de dados...")
-    if not check_database():
-        print("Abortando migração.")
-        exit(1)
+    # Backup
+    if os.path.exists(DB_PATH):
+        confirm = input("Fazer backup antes de continuar? (S/n): ").strip().lower()
+        if confirm != 'n':
+            backup_database()
     
-    # 2. Opções
-    print("\n2️⃣  Escolha uma opção:")
-    print("   [1] Fazer backup e migrar (recomendado)")
-    print("   [2] Deletar e recriar banco (todos os dados serão perdidos)")
-    print("   [3] Sair sem fazer nada")
+    # Executa migration
+    print("\n🔄 Executando migration...")
     
-    choice = input("\nOpção (1-3): ").strip()
-    
-    if choice == "1":
-        print("\n🔄 Iniciando migração...")
-        if backup_database():
-            if migrate_jobs_table():
-                print("\n✅ MIGRAÇÃO CONCLUÍDA COM SUCESSO!")
-                print(f"   Backup salvo em: {BACKUP_PATH}")
-                print("   Execute o backend e teste a aplicação")
-            else:
-                print("\n❌ Erro na migração. Backup mantido.")
-        else:
-            print("⚠️  Nenhum banco encontrado para fazer backup")
-    
-    elif choice == "2":
-        confirm = input("\n⚠️  CONFIRMAR: Deletar banco de dados? (s/N): ").strip().lower()
-        if confirm == 's':
-            if backup_database():
-                delete_and_recreate()
-                print("\n✅ BANCO DELETADO!")
-                print("   Execute 'python -m uvicorn backend.main:app --reload'")
-            else:
-                print("⚠️  Nenhum banco encontrado")
-        else:
-            print("Operação cancelada")
-    
-    elif choice == "3":
-        print("Saindo sem alterações")
-    
+    if HAS_SQLALCHEMY:
+        success = run_migration_sqlalchemy()
     else:
-        print("❌ Opção inválida")
+        success = run_migration_sqlite()
+    
+    if success:
+        print("\n✅ Database atualizado com sucesso!")
+        print("   Agora as receitas suportam escalamento baseado em porções.")
+        sys.exit(0)
+    else:
+        print("\n❌ Falha na migration. Verifique o log acima.")
+        if os.path.exists(BACKUP_PATH):
+            print(f"   Backup disponível em: {BACKUP_PATH}")
+        sys.exit(1)

@@ -34,6 +34,9 @@ class Receita(Base):
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String(120), nullable=False)
     dono_id = Column(Integer, ForeignKey("usuarios.id"), nullable=False)
+    
+    # Porção base: para quantas pessoas é a receita (1-20)
+    porcoes = Column(Integer, nullable=False, default=1)
 
     dono = relationship("Usuario", back_populates="receitas")
     ingredientes = relationship(
@@ -129,7 +132,10 @@ class Job(Base):
     receita_id = Column(Integer, ForeignKey("receitas.id", ondelete="SET NULL"), nullable=True, index=True)
 
     status = Column(String(20), nullable=False, default="queued", index=True)  # queued|running|done|failed|canceled
-    multiplicador = Column(Integer, nullable=False, default=1)
+    multiplicador = Column(Integer, nullable=False, default=1)  # DEPRECATED: usar pessoas_solicitadas
+    
+    # Escalamento baseado em porções
+    pessoas_solicitadas = Column(Integer, nullable=False, default=1)  # Para quantas pessoas executar
 
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     started_at = Column(DateTime, nullable=True)

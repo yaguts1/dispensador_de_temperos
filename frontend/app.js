@@ -22,20 +22,37 @@ class JobExecutionMonitor {
       onError: null,         // (error) => {}
       onConnectionChange: null, // (connected: bool) => {}
     };
+    
+    // Reconnection com exponential backoff
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 1000; // 1s inicial
+    this.maxReconnectDelay = 30000; // 30s máximo
+    this.reconnectTimer = null;
+    this.shouldReconnect = true;
+    this.manuallyClose = false;
   }
 
   connect() {
+    if (this.manuallyClose) {
+      console.log('[JobMonitor] Conexão cancelada (manual close)');
+      return;
+    }
+    
     const proto = this.api_base_url.startsWith('https') ? 'wss' : 'ws';
     const host = this.api_base_url.replace(/^https?:\/\//, '');
     const url = `${proto}://${host}/ws/jobs/${this.job_id}`;
     
-    console.log(`[JobMonitor] Conectando a ${url}`);
+    console.log(`[JobMonitor] Conectando a ${url} (tentativa ${this.reconnectAttempts + 1})`);
     
     this.ws = new WebSocket(url);
     
     this.ws.onopen = () => {
-      console.log(`[JobMonitor] WebSocket conectado para job ${this.job_id}`);
+      console.log(`[JobMonitor] ✓ WebSocket conectado para job ${this.job_id}`);
+      this.reconnectAttempts = 0; // Reset após sucesso
+      this.reconnectDelay = 1000;
       this.callbacks.onConnectionChange?.(true);
+      
       // Heartbeat a cada 30s
       this._heartbeatInterval = setInterval(() => {
         if (this.ws?.readyState === WebSocket.OPEN) {
@@ -55,6 +72,7 @@ class JobExecutionMonitor {
         } else if (msg.type === 'execution_complete') {
           console.log(`[JobMonitor] Execução concluída:`, msg.data);
           this.callbacks.onCompletion?.(msg.data);
+          this.shouldReconnect = false; // Job finalizado, não reconectar
           this.close();
         } else if (msg.type === 'pong') {
           // Heartbeat response, ignore
@@ -66,22 +84,51 @@ class JobExecutionMonitor {
     };
     
     this.ws.onerror = (event) => {
-      console.error(`[JobMonitor] WebSocket erro:`, event);
+      console.error(`[JobMonitor] ✗ WebSocket erro:`, event);
       this.callbacks.onError?.(event);
     };
     
-    this.ws.onclose = () => {
-      console.log(`[JobMonitor] WebSocket fechado`);
+    this.ws.onclose = (event) => {
+      console.log(`[JobMonitor] WebSocket fechado (code: ${event.code}, reason: ${event.reason})`);
       clearInterval(this._heartbeatInterval);
       this.callbacks.onConnectionChange?.(false);
+      
+      // Circuit breaker: para após max tentativas
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        console.error(`[JobMonitor] ⚠️ Circuit breaker: ${this.maxReconnectAttempts} tentativas falharam. Parando reconnect.`);
+        this.shouldReconnect = false;
+        this.callbacks.onError?.({ message: 'Falha persistente de conexão. Recarregue a página.' });
+        return;
+      }
+      
+      // Reconectar se não foi fechamento manual e job ainda ativo
+      if (this.shouldReconnect && !this.manuallyClose && !event.wasClean) {
+        this.reconnectAttempts++;
+        const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), this.maxReconnectDelay);
+        
+        console.log(`[JobMonitor] ⟳ Reconnecting em ${delay}ms (tentativa ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+        
+        this.reconnectTimer = setTimeout(() => {
+          this.connect();
+        }, delay);
+      }
     };
   }
 
   close() {
+    this.manuallyClose = true;
+    this.shouldReconnect = false;
+    
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    
     if (this.ws) {
-      this.ws.close();
+      this.ws.close(1000, 'Manual close');
       this.ws = null;
     }
+    
     clearInterval(this._heartbeatInterval);
   }
 
@@ -244,19 +291,193 @@ class App {
     this.authDlg = null;
     this.runDlg = null;
 
+    // Event listener tracking for cleanup
+    this._listeners = [];
+    this._abortControllers = new Map();
+
     this.init();
+  }
+
+  // ========= LISTENER MANAGEMENT =========
+  /**
+   * Adiciona event listener e registra para cleanup posterior
+   * @param {EventTarget} target - Elemento DOM
+   * @param {string} event - Nome do evento
+   * @param {Function} handler - Função handler
+   * @param {Object|boolean} options - Opções do addEventListener
+   * @returns {Function} Função para remover este listener específico
+   */
+  _addListener(target, event, handler, options = {}) {
+    if (!target || !event || !handler) {
+      console.warn('[Listener] Invalid parameters:', { target, event, handler });
+      return () => {};
+    }
+    
+    target.addEventListener(event, handler, options);
+    
+    const entry = { target, event, handler, options };
+    this._listeners.push(entry);
+    
+    // Retorna função cleanup para remoção individual
+    return () => {
+      const idx = this._listeners.indexOf(entry);
+      if (idx !== -1) {
+        this._listeners.splice(idx, 1);
+        target.removeEventListener(event, handler, options);
+      }
+    };
+  }
+
+  /**
+   * Remove todos os event listeners registrados
+   */
+  _removeAllListeners() {
+    console.log(`[Cleanup] Removendo ${this._listeners.length} event listeners`);
+    
+    for (const { target, event, handler, options } of this._listeners) {
+      try {
+        target.removeEventListener(event, handler, options);
+      } catch (e) {
+        console.warn('[Cleanup] Erro ao remover listener:', e);
+      }
+    }
+    
+    this._listeners = [];
+  }
+
+  /**
+   * Cancela todos os AbortControllers ativos
+   */
+  _abortAllRequests() {
+    console.log(`[Cleanup] Cancelando ${this._abortControllers.size} requests ativos`);
+    
+    for (const [key, controller] of this._abortControllers.entries()) {
+      try {
+        controller.abort();
+      } catch (e) {
+        console.warn(`[Cleanup] Erro ao abortar ${key}:`, e);
+      }
+    }
+    
+    this._abortControllers.clear();
+    
+    // Legacy abort controllers
+    if (this._suggestAbort) this._suggestAbort.abort();
+    if (this._searchAbort) this._searchAbort.abort();
+  }
+
+  /**
+   * Cria ou substitui um AbortController para uma operação específica
+   * @param {string} key - Identificador único da operação (ex: 'suggestions', 'search')
+   * @returns {AbortController}
+   */
+  _getAbortController(key) {
+    // Cancela controller anterior se existir
+    const existing = this._abortControllers.get(key);
+    if (existing) {
+      try {
+        existing.abort();
+      } catch (e) {
+        console.warn(`[AbortController] Erro ao cancelar ${key}:`, e);
+      }
+    }
+    
+    // Cria novo controller
+    const controller = new AbortController();
+    this._abortControllers.set(key, controller);
+    return controller;
+  }
+
+  /**
+   * Cleanup completo da aplicação
+   */
+  destroy() {
+    console.log('[App] Iniciando cleanup completo...');
+    
+    // Limpa timers
+    clearTimeout(this._typeTimer);
+    
+    // Fecha WebSocket se existir
+    if (this._currentMonitor) {
+      this._currentMonitor.close();
+      this._currentMonitor = null;
+    }
+    
+    // Cancela requests pendentes
+    this._abortAllRequests();
+    
+    // Remove event listeners
+    this._removeAllListeners();
+    
+    // Fecha dialogs
+    if (this.authDlg && this.authDlg.open) this.authDlg.close();
+    if (this.runDlg && this.runDlg.open) this.runDlg.close();
+    
+    console.log('[App] Cleanup completo ✓');
+  }
+
+  // ========= ERROR HANDLING =========
+  /**
+   * Tratamento centralizado de erros com fallback UI
+   * @param {Error} error - Erro capturado
+   * @param {string} context - Contexto onde erro ocorreu (ex: 'salvarReceita', 'loadRobotConfig')
+   * @param {Object} options - Opções: { silent: bool, retry: Function }
+   */
+  _handleError(error, context = 'Operação', options = {}) {
+    const { silent = false, retry = null } = options;
+    
+    console.error(`[Error] ${context}:`, error);
+    
+    // Erro de autenticação → redireciona para login
+    if (error.status === 401 || error.message?.includes('não autenticado')) {
+      if (!silent) {
+        this.toast('Sessão expirada. Faça login novamente.', 'err');
+      }
+      this.openAuthDialog('login');
+      return;
+    }
+    
+    // Erro de rede → oferece retry
+    if (error.name === 'NetworkError' || error.message?.includes('Failed to fetch')) {
+      const msg = 'Erro de conexão. Verifique sua internet.';
+      if (!silent) this.toast(msg, 'err');
+      
+      if (retry && typeof retry === 'function') {
+        console.log(`[Error] Retry disponível para ${context}`);
+      }
+      return;
+    }
+    
+    // Erro genérico → mostra mensagem
+    if (!silent) {
+      const userMsg = error.message || `Erro em ${context}`;
+      this.toast(userMsg, 'err');
+    }
   }
 
   // ========= INIT =========
   async init() {
-    this.ensureAuthBox();
-    this.bindEvents();
-    await this.refreshAuth();          // tenta descobrir sessão atual
-    await this.loadTemperoCatalog();   // catálogo padrão (+ extras do user, se houver)
-    if (this.user) { await this.loadRobotConfig(); } // já deixa em cache
-    this.renderIngredientRow();        // primeira linha vazia (usa datalist do catálogo)
-    this.selectTab('consultar');
-    this.handleListAll();
+    try {
+      this.ensureAuthBox();
+      this.bindEvents();
+      await this.refreshAuth();          // tenta descobrir sessão atual
+      await this.loadTemperoCatalog();   // catálogo padrão (+ extras do user, se houver)
+      if (this.user) { await this.loadRobotConfig(); } // já deixa em cache
+      this.renderIngredientRow();        // primeira linha vazia (usa datalist do catálogo)
+      this.selectTab('consultar');
+      this.handleListAll();
+    } catch (error) {
+      this._handleError(error, 'Inicialização do app');
+      // Fallback: garantir UI mínima funcional
+      try {
+        this.ensureAuthBox();
+        this.renderIngredientRow();
+        this.selectTab('consultar');
+      } catch (fallbackError) {
+        console.error('[CRITICAL] Falha no fallback de init:', fallbackError);
+        this.toast('Erro crítico ao carregar aplicação. Recarregue a página.', 'err');
+      }
+    }
   }
 
   // ========= AUTH UI =========
@@ -284,7 +505,7 @@ class App {
       btnOut.className = 'ghost with-icon';
       btnOut.type = 'button';
       btnOut.innerHTML = '<span class="icon icon-login" aria-hidden="true" style="transform: scaleX(-1)"></span><span>Sair</span>';
-      btnOut.addEventListener('click', async () => {
+      this._addListener(btnOut, 'click', async () => {
         await this.logout();
         // sem sessão → recarrega catálogo (volta para default)
         await this.loadTemperoCatalog();
@@ -299,13 +520,13 @@ class App {
       btnIn.className = 'ghost with-icon';
       btnIn.type = 'button';
       btnIn.innerHTML = '<span class="icon icon-login" aria-hidden="true"></span><span>Entrar</span>';
-      btnIn.addEventListener('click', () => this.openAuthDialog('login'));
+      this._addListener(btnIn, 'click', () => this.openAuthDialog('login'));
 
       const btnUp = document.createElement('button');
       btnUp.className = 'dark with-icon';
       btnUp.type = 'button';
       btnUp.innerHTML = '<span class="icon icon-login" aria-hidden="true"></span><span>Criar conta</span>';
-      btnUp.addEventListener('click', () => this.openAuthDialog('register'));
+      this._addListener(btnUp, 'click', () => this.openAuthDialog('register'));
 
       this.els.authBox.append(btnIn, btnUp);
     }
@@ -411,32 +632,32 @@ class App {
   // ================== Bindings ==================
   bindEvents() {
     // Tabs
-    this.els.tabMontar.addEventListener('click', () => this.selectTab('montar'));
-    this.els.tabConsultar.addEventListener('click', () => this.selectTab('consultar'));
-    this.els.tabRobo.addEventListener('click', () => this.selectTab('robo'));
+    this._addListener(this.els.tabMontar, 'click', () => this.selectTab('montar'));
+    this._addListener(this.els.tabConsultar, 'click', () => this.selectTab('consultar'));
+    this._addListener(this.els.tabRobo, 'click', () => this.selectTab('robo'));
 
     // Form
     if (this.els.form) {
-      this.els.form.addEventListener('submit', (e) => {
+      this._addListener(this.els.form, 'submit', (e) => {
         e.preventDefault();
         if (!this.ensureAuthOrPrompt()) return;
         if (this.state.isEditing) this.atualizarReceita();
         else this.salvarReceita();
       });
     }
-    this.els.nomeInput.addEventListener('keydown', (e) => this.handleEnterKey(e));
-    this.els.addBtn.addEventListener('click', () => {
+    this._addListener(this.els.nomeInput, 'keydown', (e) => this.handleEnterKey(e));
+    this._addListener(this.els.addBtn, 'click', () => {
       if (!this.ensureAuthOrPrompt()) return;
       this.handleAddRow();
     });
 
     // Botões de edição no formulário
-    this.els.btnAtualizar.addEventListener('click', () => {
+    this._addListener(this.els.btnAtualizar, 'click', () => {
       if (!this.ensureAuthOrPrompt()) return;
       this.atualizarReceita();
     });
-    this.els.btnCancelarEdicao.addEventListener('click', () => this.setModeCreate());
-    this.els.btnExcluirAtual.addEventListener('click', async () => {
+    this._addListener(this.els.btnCancelarEdicao, 'click', () => this.setModeCreate());
+    this._addListener(this.els.btnExcluirAtual, 'click', async () => {
       if (!this.ensureAuthOrPrompt()) return;
       const id = this.state.editId;
       if (!id) return;
@@ -445,18 +666,18 @@ class App {
     });
 
     // Robô
-    this.els.btnSalvarRobo.addEventListener('click', async () => {
+    this._addListener(this.els.btnSalvarRobo, 'click', async () => {
       if (!this.ensureAuthOrPrompt()) return;
       await this.saveRobotConfig();
       await this.loadRobotConfig(true);
       this.handleListAll();
     });
-    this.els.btnRecarregarRobo.addEventListener('click', () => {
+    this._addListener(this.els.btnRecarregarRobo, 'click', () => {
       if (!this.ensureAuthOrPrompt()) return;
       this.loadRobotConfig(true);
     });
     if (this.els.btnAddDevice) {
-      this.els.btnAddDevice.addEventListener('click', async () => {
+      this._addListener(this.els.btnAddDevice, 'click', async () => {
         if (!this.ensureAuthOrPrompt()) return;
         try {
           const data = await jfetch(`${API_URL}/devices/claims`, { method: 'POST' });
@@ -470,16 +691,16 @@ class App {
 
     // Consulta: busca ao digitar + Enter + Botão
     if (this.els.buscaNome) {
-      this.els.buscaNome.addEventListener('input', () => this.handleLiveInputDebounced());
-      this.els.buscaNome.addEventListener('keydown', (e) => {
+      this._addListener(this.els.buscaNome, 'input', () => this.handleLiveInputDebounced());
+      this._addListener(this.els.buscaNome, 'keydown', (e) => {
         if (e.key === 'Enter') { e.preventDefault(); this.handleSearchByText(); }
       });
     }
-    this.els.btnBuscar.addEventListener('click', () => this.handleSearchByText());
-    this.els.btnListar.addEventListener('click', () => this.handleListAll());
+    this._addListener(this.els.btnBuscar, 'click', () => this.handleSearchByText());
+    this._addListener(this.els.btnListar, 'click', () => this.handleListAll());
 
     // Delegação: cliques em Play/Editar/Excluir dentro da lista
-    this.els.lista.addEventListener('click', async (e) => {
+    this._addListener(this.els.lista, 'click', async (e) => {
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
       const card = btn.closest('.recipe-item, article.recipe-item');
@@ -506,8 +727,25 @@ class App {
     const t = this.els.toast;
     if (!t) return;
 
-    const color = type === 'err' ? '#ef4444' : (type === 'ok' ? '#22c55e' : 'var(--ink)');
-    t.style.backgroundColor = color;
+    // Cores com melhor contraste para legibilidade
+    let bgColor, textColor, borderColor;
+    if (type === 'err') {
+      bgColor = '#dc2626';     // Vermelho mais forte
+      textColor = '#ffffff';
+      borderColor = '#fca5a5'; // Borda clara
+    } else if (type === 'ok') {
+      bgColor = '#16a34a';     // Verde mais forte
+      textColor = '#ffffff';
+      borderColor = '#86efac'; // Borda clara
+    } else {
+      bgColor = 'rgba(10,17,40,.95)';
+      textColor = '#ffffff';
+      borderColor = 'rgba(255,255,255,.2)';
+    }
+
+    t.style.backgroundColor = bgColor;
+    t.style.color = textColor;
+    t.style.borderColor = borderColor;
 
     t.classList.remove('show');
     void t.offsetHeight;
@@ -515,7 +753,7 @@ class App {
     t.classList.add('show');
 
     clearTimeout(this._toastTimer);
-    this._toastTimer = setTimeout(() => t.classList.remove('show'), 2500);
+    this._toastTimer = setTimeout(() => t.classList.remove('show'), 3000);
   }
 
   selectTab(which) {
@@ -645,7 +883,7 @@ class App {
     });
 
     const removeBtn = el('button', { className: 'ghost', type: 'button', title: 'Remover linha' }, 'Remover');
-    removeBtn.addEventListener('click', () => {
+    this._addListener(removeBtn, 'click', () => {
       row.remove();
       this.renumberRows();
     });
@@ -747,8 +985,7 @@ class App {
       this.selectTab('consultar');
       this.handleListAll();
     } catch (e) {
-      if (e.status === 401) return this.openAuthDialog('login');
-      this.toast(e.message, 'err');
+      this._handleError(e, 'Salvar receita');
     }
   }
 
@@ -813,29 +1050,37 @@ class App {
 
   async fetchSuggestions(q) {
     try {
-      if (this._suggestAbort) this._suggestAbort.abort();
-      this._suggestAbort = new AbortController();
+      const controller = this._getAbortController('suggestions');
       const data = await jfetch(
         `${API_URL}/receitas/sugestoes?q=${encodeURIComponent(q)}`,
-        { signal: this._suggestAbort.signal }
+        { signal: controller.signal }
       );
       if (!this.els.listaSugestoes) return;
       this.els.listaSugestoes.innerHTML = Array.isArray(data)
         ? data.map(s => `<option value="${s.nome} — #${s.id}"></option>`).join('')
         : '';
-    } catch (_) { /* silencioso */ }
+    } catch (error) {
+      // Ignora AbortError (cancelamento intencional)
+      if (error.name === 'AbortError') return;
+      console.warn('[fetchSuggestions] Erro:', error);
+    }
   }
 
   async fetchSearchResults(q, quiet = false) {
     try {
-      if (this._searchAbort) this._searchAbort.abort();
-      this._searchAbort = new AbortController();
+      const controller = this._getAbortController('search');
       const data = await jfetch(
         `${API_URL}/receitas/?q=${encodeURIComponent(q)}&limit=100`,
-        { signal: this._searchAbort.signal }
+        { signal: controller.signal }
       );
       this.renderRecipeList(data, { quiet });
-    } catch (_) { /* silencioso */ }
+    } catch (error) {
+      // Ignora AbortError (cancelamento intencional)
+      if (error.name === 'AbortError') return;
+      if (!quiet) {
+        this._handleError(error, 'Buscar receitas', { silent: true });
+      }
+    }
   }
 
   async handleSearchByText() {

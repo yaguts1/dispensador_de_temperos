@@ -22,6 +22,7 @@ class IngredienteBase(BaseModel):
 
 class ReceitaBase(BaseModel):
     nome: str = Field(..., min_length=1, max_length=120)
+    porcoes: int = Field(default=1, ge=1, le=20, description="Porção base: para quantas pessoas")
     ingredientes: List[IngredienteBase]
 
     @field_validator("ingredientes")
@@ -43,6 +44,7 @@ class Ingrediente(IngredienteBase):
 
 class Receita(ReceitaBase):
     id: int
+    porcoes: int  # Garantir que seja retornado
     ingredientes: List[Ingrediente]
     model_config = ConfigDict(from_attributes=True)
 
@@ -102,7 +104,9 @@ class ReservatorioConfigOut(ReservatorioConfigIn):
 # =========================
 class JobCreateIn(BaseModel):
     receita_id: int
-    multiplicador: int = Field(1, ge=1)
+    pessoas_solicitadas: int = Field(default=1, ge=1, le=100, description="Para quantas pessoas executar")
+    # Mantém multiplicador para backwards compatibility (será ignorado)
+    multiplicador: Optional[int] = Field(default=None, ge=1, deprecated=True)
 
 
 class JobItemOut(BaseModel):
@@ -120,7 +124,8 @@ class JobOut(BaseModel):
     id: int
     status: str
     receita_id: Optional[int] = None
-    multiplicador: int
+    pessoas_solicitadas: int  # Novo campo principal
+    multiplicador: int  # Deprecated mas mantido para compatibilidade
     created_at: datetime
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None

@@ -759,6 +759,13 @@ def criar_job(
     if not receita or receita.dono_id != current.id:
         raise HTTPException(status_code=404, detail="Receita não encontrada.")
 
+    # Valida se receita tem porcoes definido (migração pode ter deixado NULL em casos raros)
+    if not receita.porcoes or receita.porcoes <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Receita sem porções definidas. Edite a receita e defina para quantas pessoas ela serve.",
+        )
+
     itens_mapeados, faltam_map, faltam_cal = _resolver_mapeamento(db, current.id, receita.ingredientes)
 
     if faltam_map:
@@ -774,10 +781,20 @@ def criar_job(
             detail=f"Calibração pendente (g/s) para: {', '.join(faltam_cal)}. Preencha na aba Robô.",
         )
 
-    # consumo por frasco (em g) considerando o multiplicador (apenas para validação)
+    # Calcula escalamento: se multiplicador fornecido (backwards compat), usa ele; senão pessoas_solicitadas
+    if payload.multiplicador is not None and payload.multiplicador > 1:
+        pessoas = payload.multiplicador
+    elif payload.pessoas_solicitadas is not None and payload.pessoas_solicitadas > 1:
+        pessoas = payload.pessoas_solicitadas
+    else:
+        pessoas = 1
+    
+    escala_fator = float(pessoas) / float(receita.porcoes)  # quantidade_final = quantidade_base * fator
+
+    # consumo por frasco (em g) considerando escalamento
     consumo_por_frasco = {}
     for frasco, _nome, q_g, _gps in itens_mapeados:
-        consumo_por_frasco[frasco] = consumo_por_frasco.get(frasco, 0.0) + (q_g * payload.multiplicador)
+        consumo_por_frasco[frasco] = consumo_por_frasco.get(frasco, 0.0) + (q_g * escala_fator)
 
     # valida estoque conhecido (None = desconhecido → não bloqueia)
     for frasco, consumo in consumo_por_frasco.items():
@@ -789,7 +806,7 @@ def criar_job(
         if cfg and cfg.estoque_g is not None and cfg.estoque_g < consumo:
             raise HTTPException(
                 status_code=409,
-                detail=f"Estoque insuficiente no Reservatório {frasco}: precisa {consumo} g, tem {cfg.estoque_g} g",
+                detail=f"Estoque insuficiente no Reservatório {frasco}: precisa {consumo:.1f} g, tem {cfg.estoque_g} g",
             )
 
     # cria job + itens (NÃO abate estoque aqui!)
@@ -797,14 +814,16 @@ def criar_job(
         user_id=current.id,
         receita_id=receita.id,
         status="queued",
-        multiplicador=payload.multiplicador,
+        multiplicador=payload.multiplicador,  # mantém para compatibilidade
+        pessoas_solicitadas=pessoas,
     )
     db.add(job)
     db.flush()
 
     ordem = 1
     for frasco, nome, q_g, gps in itens_mapeados:
-        total_g = float(q_g * payload.multiplicador)
+        # Aplica escalamento: quantidade_escalada = quantidade_base * (pessoas / porcoes)
+        total_g = float(q_g) * escala_fator
         segundos = round(total_g / float(gps), 3) if gps > 0 else 0.0
 
         db.add(

@@ -565,16 +565,20 @@ dialog form { display: grid; gap: var(--space-md); }
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   background: rgba(10,17,40,.95);
   color: #fff;
-  padding: 12px 18px;
-  border-radius: 999px;
-  font-weight: 700;
-  border: 1px solid rgba(255,255,255,.1);
-  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  padding: 14px 24px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 1px solid rgba(255,255,255,.2);
+  box-shadow: 0 8px 32px rgba(0,0,0,.6);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--transition-base), transform var(--transition-base);
   z-index: 50;
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
+  max-width: 90vw;
+  text-align: center;
+  line-height: 1.4;
 }
 #toast.show { 
   opacity: 1; 
