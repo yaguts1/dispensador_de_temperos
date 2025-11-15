@@ -815,10 +815,28 @@ bool reportJobCompletion() {
   Serial.printf("[REPORT] Completados: %d, Falhados: %d\n", 
     g_currentJob.itensConcluidos, g_currentJob.itensFalhados);
   
+  // ===== DEBUG: Exibe payload =====
+  Serial.printf("[REPORT] Payload: %s\n", body.c_str());
+  Serial.printf("[REPORT] Payload length: %d bytes\n", body.length());
+  
   // POST /devices/me/jobs/{job_id}/complete
   String path = String("/devices/me/jobs/") + String(g_currentJob.jobId) + "/complete";
+  
+  // ===== DEBUG: Exibe endpoint completo =====
+  ApiEndpoint ep = parseApi();
+  Serial.printf("[REPORT] Endpoint: %s://%s:%u%s\n", 
+    ep.https ? "https" : "http", ep.host.c_str(), ep.port, path.c_str());
+  Serial.printf("[REPORT] Token presente: %s\n", st_token.length() > 0 ? "SIM" : "NAO");
+  
   String response;
   int code = httpPOST(path, body, response);
+  
+  // ===== DEBUG: Exibe resposta detalhada =====
+  Serial.printf("[REPORT] HTTP Status Code: %d\n", code);
+  if (response.length() > 0) {
+    Serial.printf("[REPORT] Response Body: %s\n", response.c_str());
+    Serial.printf("[REPORT] Response Length: %d bytes\n", response.length());
+  }
   
   if (code == 200) {
     Serial.println("[REPORT] ✓ Relatório enviado com sucesso!");
