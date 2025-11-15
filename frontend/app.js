@@ -90,6 +90,58 @@ class JobExecutionMonitor {
   }
 }
 
+// =====================================================================
+// Gerenciador de Preferências de Porções (localStorage)
+// =====================================================================
+class PortionPreferences {
+  constructor() {
+    this.defaultQuickPortions = [1, 2, 4, 6, 8];
+    this.load();
+  }
+
+  load() {
+    const saved = localStorage.getItem('yaguts_portion_prefs');
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        this.quickPortions = data.quickPortions || this.defaultQuickPortions;
+        this.lastUsedPortion = data.lastUsedPortion || 1;
+        this.customHistory = data.customPortionHistory || [];
+      } catch {
+        this.reset();
+      }
+    } else {
+      this.quickPortions = this.defaultQuickPortions;
+      this.lastUsedPortion = 1;
+      this.customHistory = [];
+    }
+  }
+
+  save() {
+    localStorage.setItem('yaguts_portion_prefs', JSON.stringify({
+      quickPortions: this.quickPortions,
+      lastUsedPortion: this.lastUsedPortion,
+      customPortionHistory: this.customHistory.slice(0, 5)
+    }));
+  }
+
+  addToHistory(value) {
+    this.customHistory = [value, ...this.customHistory.filter(v => v !== value)].slice(0, 5);
+  }
+
+  reset() {
+    this.quickPortions = [...this.defaultQuickPortions];
+    this.lastUsedPortion = 1;
+    this.customHistory = [];
+    this.save();
+  }
+
+  setQuickPortions(values) {
+    this.quickPortions = values.filter(v => v > 0 && v <= 100);
+    this.save();
+  }
+}
+
 // -------- fetch helper (com cookies + tratamento de erro) --------
 async function jfetch(url, opts = {}) {
   const resp = await fetch(url, {
@@ -132,6 +184,7 @@ class App {
     this.robotCfg = [];       // itens do GET /config/robo
     this.robotCfgIndex = {};  // índice por rótulo (lowercase)
     this.catalogoTemperos = []; // lista padrão + extras do usuário
+    this.portionPrefs = new PortionPreferences(); // NOVO: gerenciador de porções
 
     this.els = {
       // abas e panes
@@ -495,6 +548,10 @@ class App {
     this.els.btnExcluirAtual.hidden = true;
 
     this.els.form.reset();
+    // Resetar campo de porcoes para 1
+    const porcoesInput = document.getElementById('porcoes');
+    if (porcoesInput) porcoesInput.value = 1;
+    
     this.els.linhas.innerHTML = '';
     this.renderIngredientRow();
   }
@@ -632,6 +689,14 @@ class App {
       throw new Error('Informe o nome da receita.');
     }
 
+    // NOVO: validar porcoes
+    const porcoesInput = document.getElementById('porcoes');
+    const porcoes = Number(porcoesInput?.value || 1);
+    if (!Number.isInteger(porcoes) || porcoes < 1 || porcoes > 20) {
+      porcoesInput?.focus();
+      throw new Error('A porção base deve ser um número inteiro entre 1 e 20.');
+    }
+
     const ingredientes = [];
     const rows = [...this.els.linhas.querySelectorAll('.ingredient-row')];
 
@@ -661,7 +726,7 @@ class App {
     if (ingredientes.length > 4) {
       throw new Error('Máximo de 4 ingredientes por receita.');
     }
-    return { nome, ingredientes };
+    return { nome, porcoes, ingredientes };
   }
 
   // ================== CRUD ==================
@@ -965,6 +1030,10 @@ class App {
       const recipe = await jfetch(`${API_URL}/receitas/${id}`);
       this.els.form.reset();
       this.els.nomeInput.value = recipe.nome || '';
+      
+      // NOVO: carregar porcoes
+      const porcoesInput = document.getElementById('porcoes');
+      if (porcoesInput) porcoesInput.value = recipe.porcoes || 1;
 
       this.els.linhas.innerHTML = '';
       const itens = Array.isArray(recipe.ingredientes) ? recipe.ingredientes : [];
@@ -1072,21 +1141,31 @@ class App {
           <h3 id="runTitle" style="margin:0 0 16px">Executar</h3>
 
           <fieldset>
-            <legend>Quantidade</legend>
+            <legend>Quantas Pessoas?</legend>
+            <small style="opacity: 0.8; display: block; margin-bottom: 8px" id="baseInfo">
+              Receita base: para X pessoas
+            </small>
             
-            <div class="multiplier-control">
-              <div class="multiplier-display">
-                <span id="multValue" class="mult-value">1</span>
-                <span class="mult-unit">×</span>
+            <div class="portion-control">
+              <div class="portion-display">
+                <span id="portionValue" class="portion-num">1</span>
+                <span class="portion-unit">pessoas</span>
               </div>
               
-              <input id="runMult" type="range" min="1" max="99" value="1" />
+              <div class="quick-portions" id="quickPortions" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(50px, 1fr)); gap: 6px; margin: 12px 0;">
+                <!-- Renderizado dinamicamente -->
+              </div>
               
-              <div class="quick-buttons">
-                <button type="button" class="ghost" data-quick="1">1×</button>
-                <button type="button" class="ghost" data-quick="2">2×</button>
-                <button type="button" class="ghost" data-quick="3">3×</button>
-                <button type="button" class="ghost" data-quick="5">5×</button>
+              <div class="custom-portion-input" style="display: flex; gap: 8px; margin-top: 12px;">
+                <input 
+                  id="customPeople" 
+                  type="number" 
+                  min="1" 
+                  max="100" 
+                  placeholder="Ou digite um número"
+                  style="flex: 1; padding: 8px; border-radius: 6px; border: 1px solid #31407a; background: #0f1733; color: #fff;"
+                />
+                <button type="button" id="applyCustomPeople" class="ghost" style="padding: 8px 12px;">OK</button>
               </div>
             </div>
           </fieldset>
@@ -1107,49 +1186,60 @@ class App {
 
       dlg.querySelector('#runCancel').addEventListener('click', () => dlg.close('cancel'));
       
-      // Range slider e display
-      const multInput = dlg.querySelector('#runMult');
-      const multValue = dlg.querySelector('#multValue');
-      
-      multInput.addEventListener('input', () => {
-        const value = Number(multInput.value);
-        multValue.textContent = value;
-        this._renderRunPreview();
-        this._updateQuickButtonStates(value);
-      });
-      
-      // Quick buttons
+      // Renderizar quick buttons
       dlg.addEventListener('click', (ev) => {
-        const btn = ev.target.closest('button[data-quick]');
-        if (!btn) return;
-        ev.preventDefault();
-        const mult = Number(btn.dataset.quick);
-        multInput.value = String(mult);
-        multValue.textContent = mult;
-        this._renderRunPreview();
-        this._updateQuickButtonStates(mult);
+        const btn = ev.target.closest('#quickPortions button');
+        if (btn) {
+          ev.preventDefault();
+          const portions = Number(btn.dataset.portions);
+          this._setPortionValue(portions);
+        }
       });
       
-      // Initial state
-      this._updateQuickButtonStates(1);
+      // Apply custom button
+      dlg.querySelector('#applyCustomPeople').addEventListener('click', (e) => {
+        e.preventDefault();
+        const value = Number(dlg.querySelector('#customPeople').value);
+        if (Number.isInteger(value) && value >= 1 && value <= 100) {
+          this._setPortionValue(value);
+        }
+      });
+      
+      // Enter no input customizado
+      dlg.querySelector('#customPeople').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          dlg.querySelector('#applyCustomPeople').click();
+        }
+      });
     }
 
     this._runCtx = { recipe, mapping };
     this.runDlg.querySelector('#runTitle').textContent = `Executar: ${recipe.nome}`;
+    this.runDlg.querySelector('#baseInfo').textContent = `Receita base: para ${recipe.porcoes || 1} pessoa${(recipe.porcoes || 1) !== 1 ? 's' : ''}`;
     this.runDlg.querySelector('#runHint').textContent = '';
+
+    // Restaurar última porção usada
+    const customInput = this.runDlg.querySelector('#customPeople');
+    const portionDisplay = this.runDlg.querySelector('#portionValue');
+    const lastPortion = this.portionPrefs.lastUsedPortion;
+    customInput.value = lastPortion;
+    portionDisplay.textContent = lastPortion;
+
+    this._renderQuickPortionButtons();
+    this._renderRunPreview();
 
     const confirmBtn = this.runDlg.querySelector('#runConfirm');
     confirmBtn.replaceWith(confirmBtn.cloneNode(true));
     const newConfirm = this.runDlg.querySelector('#runConfirm');
 
     newConfirm.addEventListener('click', async () => {
-      const mult = Math.max(1, Math.min(99, Number(this.runDlg.querySelector('#runMult').value || 1)));
+      const pessoas = Math.max(1, Math.min(100, Number(this.runDlg.querySelector('#customPeople').value || 1)));
       const hint = this.runDlg.querySelector('#runHint');
 
       try {
         newConfirm.disabled = true;
 
-        // opcional: checa se existe robô online
         const online = await this._checkRobotOnline();
         if (!online) {
           hint.textContent = 'Nenhum robô online agora. Verifique se o ESP está ligado e vinculado.';
@@ -1158,7 +1248,7 @@ class App {
 
         const data = await jfetch(`${API_URL}/jobs`, {
           method: 'POST',
-          body: JSON.stringify({ receita_id: recipe.id, multiplicador: mult }),
+          body: JSON.stringify({ receita_id: recipe.id, pessoas_solicitadas: pessoas }),
         });
         
         const job_id = data.id;
@@ -1166,13 +1256,16 @@ class App {
         
         this.toast(data?.detail || 'Receita enviada ao robô!', 'ok');
         
-        // **NOVO**: Conecta WebSocket para monitorar execução em tempo real
+        // Salvar porção usada
+        this.portionPrefs.lastUsedPortion = pessoas;
+        this.portionPrefs.addToHistory(pessoas);
+        this.portionPrefs.save();
+        
         this._monitorJobExecution(job_id, hint);
         
         this.runDlg.close('ok');
       } catch (e) {
         const msg = e?.data?.detail || e.message || 'Falha ao iniciar execução';
-        // se bateu no bloqueio 409, mostra CTA para cancelar o job travado
         if (e.status === 409 && /Robô ocupado/i.test(msg)) {
           hint.innerHTML = `${msg} <button id="btnCancelActive" class="ghost" type="button">Cancelar execução atual</button>`;
           const btnCancel = this.runDlg.querySelector('#btnCancelActive');
@@ -1197,31 +1290,47 @@ class App {
       }
     });
 
-    this._renderRunPreview();
     this.runDlg.showModal();
   }
 
-  /** Retorna true se houver pelo menos um device online do usuário (últimos 90s) */
-  async _checkRobotOnline() {
-    try {
-      const r = await jfetch(`${API_URL}/me/devices`);
-      return !!r?.online_any;
-    } catch {
-      // se a API cair, não vamos bloquear a tentativa
-      return true;
-    }
+  _setPortionValue(value) {
+    const portionValue = this.runDlg.querySelector('#portionValue');
+    const customInput = this.runDlg.querySelector('#customPeople');
+    
+    value = Math.max(1, Math.min(100, value));
+    portionValue.textContent = value;
+    customInput.value = value;
+    
+    this._renderQuickPortionButtons();
+    this._renderRunPreview();
   }
 
+  _renderQuickPortionButtons() {
+    const container = this.runDlg.querySelector('#quickPortions');
+    const currentValue = Number(this.runDlg.querySelector('#customPeople').value || 1);
+    container.innerHTML = '';
+    
+    for (const portions of this.portionPrefs.quickPortions) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = portions === currentValue ? 'primary' : 'ghost';
+      btn.textContent = `${portions}p`;
+      btn.dataset.portions = portions;
+      container.appendChild(btn);
+    }
+  }
 
   _renderRunPreview() {
     const ctx = this._runCtx;
     if (!ctx) return;
-    const mult = Math.max(1, Math.min(99, Number(this.runDlg.querySelector('#runMult').value || 1)));
+    const pessoas = Math.max(1, Math.min(100, Number(this.runDlg.querySelector('#customPeople').value || 1)));
+    const porcoesBase = ctx.recipe.porcoes || 1;
+    const escala = pessoas / porcoesBase;
     const ul = this.runDlg.querySelector('#runPreview');
     ul.innerHTML = '';
 
     for (const it of ctx.mapping.mapped) {
-      const total = it.quantidade * mult;
+      const total = Math.round(it.quantidade * escala * 10) / 10;
       const secs = it.gps > 0 ? Math.round((total / it.gps) * 1000) / 1000 : 0;
       const li = document.createElement('li');
       li.className = 'ingredient-line';
@@ -1233,24 +1342,21 @@ class App {
       name.textContent = it.tempero;
       const qty = document.createElement('span');
       qty.className = 'qty';
-      qty.textContent = `${it.quantidade} g × ${mult} = ${total} g • ${secs}s`;
+      qty.textContent = `${it.quantidade}g × ${escala.toFixed(1)} = ${total}g • ${secs}s`;
       li.append(badge, name, qty);
       ul.appendChild(li);
     }
   }
 
-  _updateQuickButtonStates(value) {
-    const buttons = this.runDlg.querySelectorAll('.quick-buttons button[data-quick]');
-    buttons.forEach(btn => {
-      const quick = Number(btn.dataset.quick);
-      if (quick === value) {
-        btn.classList.remove('ghost');
-        btn.classList.add('primary');
-      } else {
-        btn.classList.remove('primary');
-        btn.classList.add('ghost');
-      }
-    });
+  /** Retorna true se houver pelo menos um device online do usuário (últimos 90s) */
+  async _checkRobotOnline() {
+    try {
+      const r = await jfetch(`${API_URL}/me/devices`);
+      return !!r?.online_any;
+    } catch {
+      // se a API cair, não vamos bloquear a tentativa
+      return true;
+    }
   }
 
   async runRecipe(id, btnEl) {

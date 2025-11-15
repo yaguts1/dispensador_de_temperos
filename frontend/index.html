@@ -141,6 +141,22 @@
             A escolha do <strong>reservatório</strong> é automática com base na aba <strong>Robô</strong>.
             Cada ingrediente: <strong>1–500 g</strong>.
           </p>
+
+          <label for="porcoes">Porção Base (quantas pessoas?)</label>
+          <input
+            id="porcoes"
+            name="porcoes"
+            type="number"
+            min="1"
+            max="20"
+            value="1"
+            required
+            title="Número de pessoas para o qual a receita foi calibrada"
+          />
+          <p class="hint">
+            Indique para quantas pessoas é esta receita base. 
+            Ao executar, você poderá escalar para qualquer número de pessoas.
+          </p>
         </fieldset>
 
         <fieldset>
