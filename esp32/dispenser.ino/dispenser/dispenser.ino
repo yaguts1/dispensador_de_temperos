@@ -49,7 +49,7 @@ bool servoInitOk = false;
 #define API_PORT_HTTP        80
 
 // TLS
-#define USE_INSECURE_TLS     0      // DEV: 1. Produção: 0 + root CA
+#define USE_INSECURE_TLS     1      // DEV: 1. Produção: 0 + root CA
 static const char *LE_ISRG_ROOT_X1 =
 "-----BEGIN CERTIFICATE-----\n"
 "MIIFazCCA1OgAwIBAgISA6Z5...TRUNCATED_FOR_BREVITY...\n"
@@ -75,6 +75,7 @@ const uint16_t HTTP_RW_TIMEOUT_MS      = 7000;
 
 // Reconexão
 const uint8_t  POLL_RECONNECT_AFTER_FAILS = 3;
+const uint8_t  MAX_CLAIM_ATTEMPTS = 5;  // Máximo tentativas antes de desistir
 
 // ---------- Servidores ----------
 WebServer server(80);
@@ -119,6 +120,7 @@ void addToExecutionLog(int ordem, int frasco, const char* tempero,
 // ---------- Relógios ----------
 unsigned long lastHeartbeat = 0;
 unsigned long lastPoll = 0;
+uint8_t claimAttempts = 0;  // Contador de tentativas de claim
 
 // ---------- Utils ----------
 String chipUID() {
@@ -177,6 +179,13 @@ public:
     if (ssid.length() == 0) {
       Serial.println("[APSTA] ⚠ WiFi Yaguts não configurado");
       return false;
+    }
+    
+    // Se já está conectado ao WiFi correto, retorna sucesso
+    if (WiFi.status() == WL_CONNECTED) {
+      Serial.println("[APSTA] ✓ Já conectado ao WiFi");
+      sta_connected = true;
+      return true;
     }
     
     Serial.printf("[APSTA] 🔌 Conectando ao WiFi Yaguts: %s...\n", ssid.c_str());
@@ -454,7 +463,13 @@ int httpPOST(const String& path, const String &jsonBody, String &out) {
     client = &sclient;
   } else client = &cclient;
 
-  if (!http.begin(*client, ep.host.c_str(), ep.port, path)) { out = ""; return -1; }
+  if (!http.begin(*client, ep.host.c_str(), ep.port, path)) { 
+    Serial.println("[HTTP POST] ✗ ERRO: http.begin() falhou!");
+    Serial.printf("  Host: %s  Port: %u  Path: %s\n", ep.host.c_str(), ep.port, path.c_str());
+    Serial.printf("  HTTPS: %s  WiFi: %d (3=OK)\n", ep.https ? "SIM" : "NAO", WiFi.status());
+    out = ""; 
+    return -1; 
+  }
   httpApplyCommon(http, path);
   http.addHeader("Content-Type", "application/json");
   int code = http.POST(jsonBody);
@@ -766,13 +781,38 @@ void loop() {
 
     case ST_WIFI_CONNECT:
       if (connectSTA()) {
-        if (!st_token.length()) { if (!doClaim()) { Serial.println("[WIFI] Claim falhou, AP permanece ativo"); break; } }
+        if (!st_token.length()) {
+          claimAttempts++;
+          Serial.printf("[WIFI] Tentativa de claim %d/%d\n", claimAttempts, MAX_CLAIM_ATTEMPTS);
+          
+          if (!doClaim()) { 
+            Serial.printf("[WIFI] Claim falhou. HTTP -1 geralmente indica:\n");
+            Serial.printf("  1. Backend offline (verifique se está rodando)\n");
+            Serial.printf("  2. DNS não resolveu api.yaguts.com.br\n");
+            Serial.printf("  3. Firewall bloqueando HTTPS\n");
+            
+            if (claimAttempts >= MAX_CLAIM_ATTEMPTS) {
+              Serial.println("[WIFI] ✗ Máximo de tentativas atingido. Voltando ao portal.");
+              Serial.println("[WIFI] Acesse http://192.168.4.1 para reconfigurar.");
+              claimAttempts = 0;
+              state = ST_CONFIG_PORTAL;  // Volta ao portal após max tentativas
+              break;
+            }
+            
+            Serial.println("[WIFI] Tentando novamente em 15s...");
+            delay(15000);
+            break;
+          } else {
+            // Claim bem-sucedido, reseta contador
+            claimAttempts = 0;
+          }
+        }
         lastHeartbeat = 0; lastPoll = 0;
         state = ST_ONLINE; Serial.println("[STATE] ONLINE (com AP de fallback)");
       } else {
-        // Se falhar, tenta novamente em alguns segundos
+        // Falha ao conectar WiFi, tenta novamente
+        Serial.println("[WIFI] Falha ao conectar. Tentando novamente em 5s...");
         delay(5000);
-        state = ST_WIFI_CONNECT;
       }
       break;
 
