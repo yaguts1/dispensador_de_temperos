@@ -1068,42 +1068,70 @@ class App {
       const dlg = document.createElement('dialog');
       dlg.id = 'dlgRun';
       dlg.innerHTML = `
-        <form method="dialog" style="min-width: 320px">
-          <h3 id="runTitle" style="margin:0 0 8px">Executar</h3>
+        <form method="dialog" style="min-width: 100%; max-width: 420px">
+          <h3 id="runTitle" style="margin:0 0 16px">Executar</h3>
 
-          <label for="runMult">Multiplicador</label>
-          <div style="display:grid;grid-template-columns:1fr auto auto auto;gap:8px">
-            <input id="runMult" type="number" min="1" max="99" step="1" value="1" inputmode="numeric" />
-            <button type="button" class="ghost" data-quick="1">1×</button>
-            <button type="button" class="ghost" data-quick="2">2×</button>
-            <button type="button" class="ghost" data-quick="3">3×</button>
-          </div>
+          <fieldset>
+            <legend>Quantidade</legend>
+            
+            <div class="multiplier-control">
+              <div class="multiplier-display">
+                <span id="multValue" class="mult-value">1</span>
+                <span class="mult-unit">×</span>
+              </div>
+              
+              <input id="runMult" type="range" min="1" max="99" value="1" />
+              
+              <div class="quick-buttons">
+                <button type="button" class="ghost" data-quick="1">1×</button>
+                <button type="button" class="ghost" data-quick="2">2×</button>
+                <button type="button" class="ghost" data-quick="3">3×</button>
+                <button type="button" class="ghost" data-quick="5">5×</button>
+              </div>
+            </div>
+          </fieldset>
 
-          <details style="margin-top:10px">
-            <summary>Prévia dos tempos</summary>
-            <ul id="runPreview" class="ingredients" style="margin-top:8px"></ul>
+          <details style="margin-top:14px">
+            <summary>📊 Prévia dos tempos</summary>
+            <ul id="runPreview" class="ingredients" style="margin-top:10px"></ul>
           </details>
 
-          <div class="actions" style="grid-template-columns: 1fr 1fr; margin-top: 12px">
+          <div class="actions" style="grid-template-columns: 1fr 1fr; margin-top: 16px">
             <button id="runCancel" type="button" class="ghost">Cancelar</button>
             <button id="runConfirm" class="primary" type="button">Executar</button>
           </div>
-          <p class="hint" id="runHint" style="margin-top:6px"></p>
+          <p class="hint" id="runHint" style="margin-top:8px"></p>
         </form>`;
       document.body.appendChild(dlg);
       this.runDlg = dlg;
 
       dlg.querySelector('#runCancel').addEventListener('click', () => dlg.close('cancel'));
+      
+      // Range slider e display
+      const multInput = dlg.querySelector('#runMult');
+      const multValue = dlg.querySelector('#multValue');
+      
+      multInput.addEventListener('input', () => {
+        const value = Number(multInput.value);
+        multValue.textContent = value;
+        this._renderRunPreview();
+        this._updateQuickButtonStates(value);
+      });
+      
+      // Quick buttons
       dlg.addEventListener('click', (ev) => {
         const btn = ev.target.closest('button[data-quick]');
         if (!btn) return;
         ev.preventDefault();
         const mult = Number(btn.dataset.quick);
-        const input = dlg.querySelector('#runMult');
-        input.value = String(mult);
+        multInput.value = String(mult);
+        multValue.textContent = mult;
         this._renderRunPreview();
+        this._updateQuickButtonStates(mult);
       });
-      dlg.querySelector('#runMult').addEventListener('input', () => this._renderRunPreview());
+      
+      // Initial state
+      this._updateQuickButtonStates(1);
     }
 
     this._runCtx = { recipe, mapping };
@@ -1209,6 +1237,20 @@ class App {
       li.append(badge, name, qty);
       ul.appendChild(li);
     }
+  }
+
+  _updateQuickButtonStates(value) {
+    const buttons = this.runDlg.querySelectorAll('.quick-buttons button[data-quick]');
+    buttons.forEach(btn => {
+      const quick = Number(btn.dataset.quick);
+      if (quick === value) {
+        btn.classList.remove('ghost');
+        btn.classList.add('primary');
+      } else {
+        btn.classList.remove('primary');
+        btn.classList.add('ghost');
+      }
+    });
   }
 
   async runRecipe(id, btnEl) {

@@ -240,7 +240,7 @@ button.dark:hover:not(:disabled) { background: #141b34; }
 
 /* Grid de ingredientes */
 .grid-header {
-  display: grid;
+  display: none;
   grid-template-columns: 1.2fr .9fr 40px;
   gap: 8px;
   margin: .4rem 0;
@@ -253,46 +253,92 @@ button.dark:hover:not(:disabled) { background: #141b34; }
   border-radius: 10px;
   text-align: center;
 }
+
+@media (min-width: 640px) {
+  .grid-header {
+    display: grid;
+  }
+}
+
 .grid-rows { display: grid; gap: 8px; }
 .ingredient-row {
   display: grid;
-  grid-template-columns: 1.2fr .9fr 40px;
+  grid-template-columns: 1fr;
   gap: 8px;
   align-items: center;
 }
+
+@media (min-width: 640px) {
+  .ingredient-row {
+    grid-template-columns: 1.2fr .9fr 40px;
+  }
+}
+
 .ingredient-row + .ingredient-row { margin-top: 0; }
 
 .mobile-label {
-  display: none;
+  display: block;
   font-size: .85rem;
   color: var(--muted);
   margin: 2px 0 4px;
 }
-@media (max-width: 720px) {
-  .grid-header { display: none; }
-  .ingredient-row { grid-template-columns: 1fr; }
-  .mobile-label { display: block; }
+@media (min-width: 640px) {
+  .mobile-label { display: none; }
 }
 
 /* Lista / Cards */
 .search-bar {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr;
   gap: 8px;
   margin-bottom: 12px;
 }
-@media (max-width: 680px) { .search-bar { grid-template-columns: 1fr; } }
+@media (min-width: 640px) {
+  .search-bar {
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+  }
+}
+@media (min-width: 1024px) {
+  .search-bar {
+    grid-template-columns: 2fr auto auto;
+    gap: 12px;
+  }
+}
 
-.recipe-list { display: grid; gap: var(--space-md); margin-top: var(--space-lg); }
+.recipe-list { 
+  display: grid; 
+  gap: 12px; 
+  margin-top: var(--space-lg); 
+}
+@media (min-width: 640px) {
+  .recipe-list { gap: 14px; }
+}
+@media (min-width: 1024px) {
+  .recipe-list { gap: 16px; }
+}
+
 .recipe-item {
   background: linear-gradient(135deg, rgba(79,124,255,.04) 0%, transparent 100%);
   border: 1px solid rgba(255,255,255,.08);
   border-radius: var(--radius);
-  padding: var(--space-md);
+  padding: 12px;
   position: relative;
-  padding-right: 76px;
   transition: transform var(--transition-base), border-color var(--transition-base), box-shadow var(--transition-base), background var(--transition-base);
 }
+@media (min-width: 640px) {
+  .recipe-item {
+    padding: 14px;
+    padding-right: 72px;
+  }
+}
+@media (min-width: 1024px) {
+  .recipe-item {
+    padding: 16px;
+    padding-right: 76px;
+  }
+}
+
 .recipe-item:hover {
   border-color: rgba(79,124,255,.3);
   box-shadow: 0 4px 12px rgba(79,124,255,.15);
@@ -319,12 +365,30 @@ button.dark:hover:not(:disabled) { background: #141b34; }
 
 /* Ações do card */
 .card-actions {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: var(--space-sm);
+  margin-top: 10px;
+  background: rgba(79,124,255,.05);
+  padding: 10px;
+  border-radius: 10px;
 }
+
+@media (min-width: 640px) {
+  .card-actions {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    flex-direction: row;
+    gap: var(--space-sm);
+    margin-top: 0;
+    background: transparent;
+    padding: 0;
+    border-radius: 0;
+  }
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -528,6 +592,153 @@ noscript {
   background: #ef4444;
   text-align: center;
   margin-top: 12px;
+}
+
+/* ===================== */
+/* Range Slider (Multiplicador) */
+/* ===================== */
+input[type="range"] {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #4f7cff 0%, #22c55e 50%, #f59e0b 100%);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  margin: 16px 0;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e8ecf8;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  transition: all var(--transition-fast);
+  border: 2px solid #4f7cff;
+}
+
+input[type="range"]::-webkit-slider-thumb:hover,
+input[type="range"]::-webkit-slider-thumb:active {
+  transform: scale(1.15);
+  box-shadow: 0 4px 16px rgba(79,124,255,.5);
+}
+
+input[type="range"]::-moz-range-track {
+  background: transparent;
+  border: none;
+}
+
+input[type="range"]::-moz-range-progress {
+  background: #4f7cff;
+  height: 8px;
+  border-radius: 4px;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #e8ecf8;
+  cursor: pointer;
+  border: 2px solid #4f7cff;
+  box-shadow: 0 2px 8px rgba(0,0,0,.3);
+  transition: all var(--transition-fast);
+}
+
+input[type="range"]::-moz-range-thumb:hover,
+input[type="range"]::-moz-range-thumb:active {
+  transform: scale(1.15);
+  box-shadow: 0 4px 16px rgba(79,124,255,.5);
+}
+
+/* Controle de Multiplicador */
+.multiplier-control {
+  display: grid;
+  gap: 12px;
+}
+
+.multiplier-display {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 16px;
+  background: linear-gradient(135deg, rgba(79,124,255,.1) 0%, rgba(34,197,94,.05) 100%);
+  border-radius: 12px;
+  border: 1.5px solid rgba(79,124,255,.25);
+  text-align: center;
+  justify-content: center;
+  transition: all var(--transition-base);
+}
+
+.multiplier-display:hover {
+  border-color: rgba(79,124,255,.4);
+  background: linear-gradient(135deg, rgba(79,124,255,.15) 0%, rgba(34,197,94,.1) 100%);
+}
+
+.mult-value {
+  font-size: 2.5rem;
+  font-weight: 900;
+  color: #4f7cff;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.mult-unit {
+  font-size: 1.4rem;
+  color: var(--muted);
+  margin-left: 4px;
+  font-weight: 700;
+}
+
+.quick-buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.quick-buttons button {
+  padding: 12px 8px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-radius: 10px;
+  transition: all var(--transition-fast);
+  border: 1px solid rgba(255,255,255,.1);
+}
+
+.quick-buttons button.primary {
+  background: var(--success);
+  color: #04120a;
+  border-color: transparent;
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(34,197,94,.3);
+}
+
+.quick-buttons button.primary:hover {
+  background: #1ea853;
+  transform: scale(1.1);
+  box-shadow: 0 6px 16px rgba(34,197,94,.4);
+}
+
+@media (max-width: 640px) {
+  .quick-buttons {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  
+  .multiplier-display {
+    padding: 14px;
+  }
+  
+  .mult-value {
+    font-size: 2rem;
+  }
+  
+  .mult-unit {
+    font-size: 1.1rem;
+  }
 }
 
 /* Botões com ícone */
