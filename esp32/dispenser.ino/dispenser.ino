@@ -1,18 +1,31 @@
 /*
-  Yaguts Dispenser — ESP32 Base (v0.1.4) – fix de reboot por WebServer precoce
+  ============================================================================
+  YAGUTS DISPENSER - ESP32 MAIN
   
-  Arquitetura:
-  - dispenser.ino (este arquivo): WiFi, AP, API, heartbeat, polling
-  - job_execution.ino: Execução offline + report + resume (TAB SEPARADO)
-  - job_persistence.h: Flash persistence via Preferences (incluído)
-  - yaguts_types.h: Tipos e structs (incluído)
+  v0.1.4 - WiFi + Portal + API + Job Polling
   
-  IMPORTANTE: WebServer só inicia DEPOIS de STA/AP ativos (evita assert xQueueSemaphoreTake).
+  Arquitetura Multi-Tab:
+  1. dispenser.ino (este arquivo) - WiFi, portal, heartbeat, polling
+  2. job_execution.ino - Executa jobs, reporta, resume (TAB SEPARADO)
+  3. job_persistence.h - Flash storage (incluído)
+  4. yaguts_types.h - Tipos (incluído)
+  
+  ============================================================================
 */
 
 #include <Arduino.h>
-#include "yaguts_types.h"   // struct ApiEndpoint { String host; uint16_t port; bool https; }
-#include "job_persistence.h" // Persistência de jobs em Flash (offline-first)
+#include <WiFi.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <HTTPClient.h>
+#include <WiFiClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
+#include <Preferences.h>
+
+// Includes locais
+#include "yaguts_types.h"
+#include "job_persistence.h"
 
 #include <WiFi.h>
 #include <WebServer.h>
