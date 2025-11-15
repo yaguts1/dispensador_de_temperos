@@ -1,19 +1,19 @@
 /*
-  Yaguts Dispenser — ESP32 Base (v0.1.4) – fix de reboot por WebServer precoce
+  ============================================================================
+  YAGUTS DISPENSER - ESP32 MAIN
   
-  Arquitetura:
-  - dispenser.ino (este arquivo): WiFi, AP, API, heartbeat, polling
-  - job_execution.ino: Execução offline + report + resume (TAB SEPARADO)
-  - job_persistence.h: Flash persistence via Preferences (incluído)
-  - yaguts_types.h: Tipos e structs (incluído)
+  v0.1.4 - WiFi + Portal + API + Job Polling
   
-  IMPORTANTE: WebServer só inicia DEPOIS de STA/AP ativos (evita assert xQueueSemaphoreTake).
+  Arquitetura Multi-Tab:
+  1. dispenser.ino (este arquivo) - WiFi, portal, heartbeat, polling
+  2. job_execution.ino - Executa jobs, reporta, resume (TAB SEPARADO)
+  3. job_persistence.h - Flash storage (incluído)
+  4. yaguts_types.h - Tipos (incluído)
+  
+  ============================================================================
 */
 
 #include <Arduino.h>
-#include "yaguts_types.h"   // struct ApiEndpoint { String host; uint16_t port; bool https; }
-#include "job_persistence.h" // Persistência de jobs em Flash (offline-first)
-
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
@@ -22,10 +22,25 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <Preferences.h>
-#include <esp_system.h>
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
+// Includes locais
+#include "yaguts_types.h"
+#include "job_persistence.h"
 
 // ---------- Versão ----------
 #define FW_VERSION           "0.1.4"
+
+// ---------- I2C Servo Driver (PCA9685) ----------
+#define SDA_PIN              21
+#define SCL_PIN              22
+#define I2C_SERVO_ADDR       0x40
+#define SERVO_FREQ           50      // 50 Hz para servos SG90
+#define SERVO_MIN_US         1000    // Posição fechada (0°)
+#define SERVO_MAX_US         2000    // Posição aberta (90°)
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(I2C_SERVO_ADDR);
+bool servoInitOk = false;
 
 // ---------- API ----------
 #define DEFAULT_API_HOST     "api.yaguts.com.br"
@@ -44,8 +59,10 @@ static const char *LE_ISRG_ROOT_X1 =
 #define DEBUG_HTTP           1
 
 // ---------- Pinos ----------
-const int PIN_RES[4] = { 26, 27, 32, 33 };
-const bool RELAY_ACTIVE_HIGH = true;
+// ANTIGO (relés): const int PIN_RES[4] = { 26, 27, 32, 33 };
+// NOVO (servos via PCA9685): 4 canais (0-3)
+const int SERVO_CHANNELS[4] = { 0, 1, 2, 3 };  // Canais do PCA9685 para cada frasco
+const bool RELAY_ACTIVE_HIGH = true;  // DESCONTINUADO (agora usa servo)
 const unsigned long MAX_STEP_MS = 180000UL;
 
 // ---------- Timings ----------
@@ -90,7 +107,7 @@ bool reportJobCompletion();
 bool tryResumeJobFromFlash();
 void addToExecutionLog(int ordem, int frasco, const char* tempero, 
                        float quantidade_g, float segundos, 
-                       const char* status, const char* error_msg = nullptr);
+                       const char* status, const char* error_msg);
 
 // ---------- Relógios ----------
 unsigned long lastHeartbeat = 0;
@@ -375,7 +392,7 @@ static String _scan_token_from_body(const String& body) {
     int c = body.indexOf(':', i); if (c < 0) continue;
     while (c+1 < (int)body.length() && (body[c+1]==' '||body[c+1]=='\t')) c++;
     int q1 = body.indexOf('"', c+1); if (q1 < 0) continue;
-    int q2 = body.indexOf('"', q1+1); if (q2 < 0) continue;
+    int q2 = body.indexOf('"', q1+1); if (q2 < 0) continue; 
     String tok = body.substring(q1+1, q2);
     if (tok.length() > 10) return tok;
   }
@@ -426,12 +443,25 @@ bool postJobStatus(int jobId, const char* status, const char* errmsg = nullptr) 
 }
 
 void runReservoir(int frasco, unsigned long ms) {
-  if (frasco < 1 || frasco > 4) return;
-  int pin = PIN_RES[frasco - 1];
-  digitalWrite(pin, RELAY_ACTIVE_HIGH ? HIGH : LOW);
+  if (frasco < 1 || frasco > 4 || !servoInitOk) return;
+  
+  int servoChannel = SERVO_CHANNELS[frasco - 1];
+  
+  // Abre o servo (90 graus): 2000 µs
+  Serial.printf("[SERVO] Abrindo frasco %d (canal %d)...\n", frasco, servoChannel);
+  pwm.writeMicroseconds(servoChannel, SERVO_MAX_US);
+  delay(100);  // Pequeno atraso para servo se mover
+  
+  // Mantém aberto pelo tempo especificado
   unsigned long t0 = millis();
-  while (millis() - t0 < ms) { delay(10); }
-  digitalWrite(pin, RELAY_ACTIVE_HIGH ? LOW : HIGH);
+  while (millis() - t0 < ms) {
+    delay(10);
+  }
+  
+  // Fecha o servo (0 graus): 1000 µs
+  Serial.printf("[SERVO] Fechando frasco %d (canal %d)\n", frasco, servoChannel);
+  pwm.writeMicroseconds(servoChannel, SERVO_MIN_US);
+  delay(100);  // Pequeno atraso para servo se mover
 }
 
 bool executeJob(const String& json) {
@@ -508,7 +538,30 @@ bool pollNextJob() {
 
 /* ---------- Setup / Loop ---------- */
 void setupPins() {
-  for (int i = 0; i < 4; i++) { pinMode(PIN_RES[i], OUTPUT); digitalWrite(PIN_RES[i], RELAY_ACTIVE_HIGH ? LOW : HIGH); }
+  // Inicializa I2C para servo driver
+  Serial.println("[SERVO] Inicializando I2C...");
+  Wire.begin(SDA_PIN, SCL_PIN);
+  delay(100);
+  
+  // Inicializa PCA9685
+  if (!pwm.begin()) {
+    Serial.println("[SERVO] ✗ Falha ao inicializar PCA9685!");
+    servoInitOk = false;
+    return;
+  }
+  
+  // Configura frequência do servo
+  pwm.setOscillatorFrequency(25000000);  // 25 MHz (padrão PCA9685)
+  pwm.setPWMFreq(SERVO_FREQ);            // 50 Hz para SG90
+  delay(10);
+  
+  // Coloca todos os servos em posição fechada (1000 µs = 0°)
+  for (int i = 0; i < 4; i++) {
+    pwm.writeMicroseconds(SERVO_CHANNELS[i], SERVO_MIN_US);
+  }
+  
+  Serial.println("[SERVO] ✓ PCA9685 inicializado com sucesso!");
+  servoInitOk = true;
 }
 
 void loadPrefs() {
@@ -590,4 +643,230 @@ void loop() {
       delay(10);
       break;
   }
+}
+
+// ============================================================================
+// ADICIONAR ITEM AO LOG DE EXECUÇÃO
+// ============================================================================
+
+void addToExecutionLog(int ordem, int frasco, const char* tempero, 
+                       float quantidade_g, float segundos, 
+                       const char* status, const char* error_msg = nullptr) {
+  
+  JsonObject item = g_executionLog.createNestedObject();
+  item["item_ordem"] = ordem;
+  item["frasco"] = frasco;
+  item["tempero"] = tempero;
+  item["quantidade_g"] = quantidade_g;
+  item["segundos"] = segundos;
+  item["status"] = status;
+  
+  if (error_msg) {
+    item["error"] = error_msg;
+  }
+  
+  Serial.printf("[LOG] Item %d: Frasco %d (%s) - %s\n", 
+    ordem, frasco, tempero, status);
+}
+
+// ============================================================================
+// EXECUTAR JOB OFFLINE (COM PERSISTÊNCIA)
+// ============================================================================
+
+bool executeJobOfflineWithPersistence() {
+  
+  if (!g_currentJob.jobId) {
+    Serial.println("[EXEC] Nenhum job em memória");
+    return false;
+  }
+  
+  Serial.printf("[EXEC] ========== Iniciando execução do job %d ==========\n", 
+    g_currentJob.jobId);
+  Serial.printf("[EXEC] Resumindo de item %d/%d\n", 
+    g_currentJob.itensConcluidos + 1, g_currentJob.totalItens);
+  
+  // Parse JSON do job completo
+  StaticJsonDocument<4096> jobDoc;
+  DeserializationError error = deserializeJson(jobDoc, g_currentJob.jsonPayload);
+  
+  if (error) {
+    Serial.printf("[EXEC] ✗ JSON corrompido: %s\n", error.c_str());
+    return false;
+  }
+  
+  JsonArray itens = jobDoc["itens"].as<JsonArray>();
+  if (itens.isNull() || itens.size() == 0) {
+    Serial.println("[EXEC] ✗ Array 'itens' inválido ou vazio");
+    return false;
+  }
+  
+  if (itens.size() != g_currentJob.totalItens) {
+    Serial.printf("[EXEC] ⚠ Mismatch: esperava %d itens, JSON tem %d\n", 
+      g_currentJob.totalItens, itens.size());
+  }
+  
+  // Clear log anterior
+  g_executionLog.clear();
+  
+  unsigned long execStartTime = millis();
+  
+  // =============== LOOP DE EXECUÇÃO ===============
+  for (int i = g_currentJob.itensConcluidos; i < itens.size(); i++) {
+    
+    JsonObject item = itens[i];
+    int frasco = item["frasco"] | 0;
+    float quantidade_g = item["quantidade_g"] | 0.0;
+    float segundos = item["segundos"] | 0.0;
+    const char* tempero = item["tempero"] | "?";
+    
+    // Validação
+    if (frasco < 1 || frasco > 4) {
+      Serial.printf("[EXEC] ✗ Item %d: frasco %d inválido\n", i + 1, frasco);
+      g_currentJob.itensFalhados++;
+      addToExecutionLog(i + 1, frasco, tempero, quantidade_g, segundos, 
+                       "failed", "frasco inválido");
+      g_currentJob.jsonPayload[0] = '\0';  // Limpa JSON
+      saveJob(g_currentJob);
+      continue;
+    }
+    
+    // Se tempo é 0, pula (nada a dispensar)
+    if (segundos <= 0) {
+      Serial.printf("[EXEC] ⊘ Item %d: tempo %.3fs = pula\n", i + 1, segundos);
+      g_currentJob.itensConcluidos++;
+      addToExecutionLog(i + 1, frasco, tempero, quantidade_g, segundos, "done");
+      saveJob(g_currentJob);
+      continue;
+    }
+    
+    // Limita tempo máximo
+    unsigned long ms = (unsigned long)(segundos * 1000.0);
+    if (ms > MAX_STEP_MS) {
+      Serial.printf("[EXEC] ⚠ Item %d: tempo %.3fs → limitado para %.1fs\n", 
+        i + 1, segundos, MAX_STEP_MS / 1000.0);
+      ms = MAX_STEP_MS;
+    }
+    
+    // ========== EXECUTA RELÉ ==========
+    Serial.printf("[EXEC] Item %d/%d: Frasco %d por %.3fs\n", 
+      i + 1, itens.size(), frasco, segundos);
+    
+    unsigned long itemStart = millis();
+    
+    // BLOQUEANTE: Ativa relé e espera
+    runReservoir(frasco, ms);
+    
+    unsigned long itemDuration = millis() - itemStart;
+    float realSeconds = itemDuration / 1000.0;
+    
+    // ========== SUCESSO =========
+    g_currentJob.itensConcluidos++;
+    addToExecutionLog(i + 1, frasco, tempero, quantidade_g, segundos, "done");
+    
+    // Salva progresso em Flash (recovery após crash)
+    saveJob(g_currentJob);
+    
+    Serial.printf("[EXEC] ✓ Item %d concluído (real: %.2fs). Progresso salvo.\n", 
+      i + 1, realSeconds);
+  }
+  // =============== FIM LOOP ===============
+  
+  unsigned long totalDuration = millis() - execStartTime;
+  Serial.printf("[EXEC] ========== Execução concluída em %.2fs ==========\n", 
+    totalDuration / 1000.0);
+  Serial.printf("[EXEC] Resultado: %d OK, %d falhas\n", 
+    g_currentJob.itensConcluidos, g_currentJob.itensFalhados);
+  
+  return true;
+}
+
+// ============================================================================
+// REPORTAR CONCLUSÃO AO BACKEND
+// ============================================================================
+
+bool reportJobCompletion() {
+  
+  if (!g_currentJob.jobId) {
+    Serial.println("[REPORT] Nenhum job para reportar");
+    return false;
+  }
+  
+  // Serializa log em JSON
+  String logJson;
+  serializeJson(g_executionLog, logJson);
+  
+  // Constrói payload para POST
+  StaticJsonDocument<512> payload;
+  payload["itens_completados"] = g_currentJob.itensConcluidos;
+  payload["itens_falhados"] = g_currentJob.itensFalhados;
+  
+  // Parse log e adiciona ao payload
+  StaticJsonDocument<2048> logParsed;
+  if (!deserializeJson(logParsed, logJson)) {
+    JsonArray logArray = logParsed.as<JsonArray>();
+    payload["execution_logs"] = logArray;
+  }
+  
+  String body;
+  serializeJson(payload, body);
+  
+  Serial.printf("[REPORT] Enviando relatório do job %d (tentativa)\n", 
+    g_currentJob.jobId);
+  Serial.printf("[REPORT] Completados: %d, Falhados: %d\n", 
+    g_currentJob.itensConcluidos, g_currentJob.itensFalhados);
+  
+  // POST /devices/me/jobs/{job_id}/complete
+  String path = String("/devices/me/jobs/") + String(g_currentJob.jobId) + "/complete";
+  String response;
+  int code = httpPOST(path, body, response);
+  
+  if (code == 200) {
+    Serial.println("[REPORT] ✓ Relatório enviado com sucesso!");
+    Serial.printf("[REPORT] Response: %s\n", response.c_str());
+    
+    // Limpa job da Flash (foi processado)
+    clearJob();
+    g_executionLog.clear();
+    g_currentJob.jobId = 0;
+    
+    return true;
+  }
+  
+  Serial.printf("[REPORT] ✗ Falha ao reportar: HTTP %d\n", code);
+  Serial.printf("[REPORT] Mantendo job em Flash para retry posterior\n");
+  
+  return false;
+}
+
+// ============================================================================
+// TENTAR RETOMAR JOB ANTERIOR (APÓS CRASH/REBOOT)
+// ============================================================================
+
+bool tryResumeJobFromFlash() {
+  
+  if (!hasJobInFlash()) {
+    return false;
+  }
+  
+  Serial.println("[RESUME] ⚡ Job pendente detectado em Flash!");
+  
+  JobState resumedJob = {0};
+  if (!loadJob(resumedJob)) {
+    return false;
+  }
+  
+  // Restaura em memória
+  g_currentJob = resumedJob;
+  
+  // Parse log anterior se houver
+  if (resumedJob.logPayload[0] != '\0') {
+    deserializeJson(g_executionLog, resumedJob.logPayload);
+  }
+  
+  Serial.printf("[RESUME] Retomando job %d (item %d/%d)\n", 
+    g_currentJob.jobId, 
+    g_currentJob.itensConcluidos + 1, 
+    g_currentJob.totalItens);
+  
+  return true;
 }
