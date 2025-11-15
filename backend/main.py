@@ -43,8 +43,8 @@ ALGORITHM = "HS256"
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
 ACCESS_TOKEN_MINUTES = int(os.getenv("ACCESS_TOKEN_MINUTES", str(60 * 24 * 7)))  # 7 dias
 COOKIE_NAME = "access_token"
-COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", ".yaguts.com.br")  # para dev local, deixe vazio ""
-COOKIE_SECURE = os.getenv("COOKIE_SECURE", "1") == "1"        # produção: 1, dev: 0
+COOKIE_DOMAIN = os.getenv("COOKIE_DOMAIN", "")  # vazio para localhost, ".yaguts.com.br" para produção
+COOKIE_SECURE = os.getenv("COOKIE_SECURE", "0") == "1"        # 0 para localhost (http), 1 para produção (https)
 COOKIE_SAMESITE = "Lax"  # subdomínios são "same-site", Lax funciona bem
 
 # Catálogo base (padrão)

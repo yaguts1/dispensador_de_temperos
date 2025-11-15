@@ -1,5 +1,7 @@
 // ================== Configurações ==================
-const API_URL = 'https://api.yaguts.com.br';
+//const API_URL = 'https://api.yaguts.com.br';
+
+const API_URL = 'http://localhost:8000';
 
 // Busca ao digitar
 const AUTOCOMPLETE_MIN_CHARS = 1;

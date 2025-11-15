@@ -1,26 +1,26 @@
 /*
-  job_execution.ino - Funções de execução offline de jobs
+  ============================================================================
+  YAGUTS DISPENSER - JOB EXECUTION
+  
+  Arquivo TAB 2 do projeto (job_execution.ino)
   
   Implementa:
-  - executeOfflineWithPersistence() - Executa job localmente (offline-safe)
+  - executeJobOfflineWithPersistence() - Executa job localmente
   - reportJobCompletion() - Reporta resultado ao backend
-  - addToLog() - Adiciona item ao log de execução
+  - tryResumeJobFromFlash() - Recupera job após crash
   
-  Integração: Copiar para dispenser.ino ou incluir como tab no Arduino IDE
+  Compartilha globais com dispenser.ino:
+  - g_currentJob
+  - g_executionLog
+  - g_lastReportAttempt
+  
+  ============================================================================
 */
 
-// ===================================================================
-// Variáveis globais para job em execução
-// ===================================================================
+// ============================================================================
+// ADICIONAR ITEM AO LOG DE EXECUÇÃO
+// ============================================================================
 
-JobState g_currentJob = {0};                    // Job atual em memória
-StaticJsonDocument<2048> g_executionLog;       // Log de execução
-unsigned long g_lastReportAttempt = 0;         // Último retry de report
-const unsigned long REPORT_RETRY_INTERVAL = 30000;  // Retry a cada 30s
-
-// ===================================================================
-// Adicionar item ao log de execução
-// ===================================================================
 void addToExecutionLog(int ordem, int frasco, const char* tempero, 
                        float quantidade_g, float segundos, 
                        const char* status, const char* error_msg = nullptr) {
@@ -41,9 +41,10 @@ void addToExecutionLog(int ordem, int frasco, const char* tempero,
     ordem, frasco, tempero, status);
 }
 
-// ===================================================================
-// Executar Job Offline (com persistência)
-// ===================================================================
+// ============================================================================
+// EXECUTAR JOB OFFLINE (COM PERSISTÊNCIA)
+// ============================================================================
+
 bool executeJobOfflineWithPersistence() {
   
   if (!g_currentJob.jobId) {
@@ -151,9 +152,10 @@ bool executeJobOfflineWithPersistence() {
   return true;
 }
 
-// ===================================================================
-// Reportar Conclusão ao Backend
-// ===================================================================
+// ============================================================================
+// REPORTAR CONCLUSÃO AO BACKEND
+// ============================================================================
+
 bool reportJobCompletion() {
   
   if (!g_currentJob.jobId) {
@@ -208,9 +210,10 @@ bool reportJobCompletion() {
   return false;
 }
 
-// ===================================================================
-// Tentar Retomar Job Anterior (após crash/reboot)
-// ===================================================================
+// ============================================================================
+// TENTAR RETOMAR JOB ANTERIOR (APÓS CRASH/REBOOT)
+// ============================================================================
+
 bool tryResumeJobFromFlash() {
   
   if (!hasJobInFlash()) {
