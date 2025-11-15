@@ -2,10 +2,10 @@
   ============================================================================
   YAGUTS DISPENSER - ESP32 MAIN
   
-  v0.1.4 - WiFi + Portal + API + Job Polling
+  v0.1.5 - WiFi Dual Mode (APSTA) + Portal + API + Job Polling
   
   Arquitetura Multi-Tab:
-  1. dispenser.ino (este arquivo) - WiFi, portal, heartbeat, polling
+  1. dispenser.ino (este arquivo) - WiFi Dual Mode, portal, heartbeat, polling
   2. job_execution.ino - Executa jobs, reporta, resume (TAB SEPARADO)
   3. job_persistence.h - Flash storage (incluído)
   4. yaguts_types.h - Tipos (incluído)
@@ -30,7 +30,7 @@
 #include "job_persistence.h"
 
 // ---------- Versão ----------
-#define FW_VERSION           "0.1.4"
+#define FW_VERSION           "0.1.5"
 
 // ---------- I2C Servo Driver (PCA9685) ----------
 #define SDA_PIN              21
@@ -84,6 +84,13 @@ const byte DNS_PORT = 53;
 bool portalActive = false;
 volatile bool portalSaved = false;
 
+// ---------- WiFi Dual Mode (APSTA) ----------
+enum WiFiMode { WIFI_MODE_PORTAL_ONLY, WIFI_MODE_DUAL };
+WiFiMode currentWiFiMode = WIFI_MODE_PORTAL_ONLY;
+String ap_ssid_current = "";
+bool ap_active = false;
+bool sta_connected = false;
+
 // ---------- Persistência ----------
 Preferences prefs;
 String st_ssid, st_pass, st_token, st_api, st_claim;
@@ -126,6 +133,121 @@ static inline void logDiag(const char* tag) {
   Serial.printf("[%s] t=%lu WiFi=%d RSSI=%d heap=%u\n",
                 tag, millis(), (int)WiFi.status(), (int)WiFi.RSSI(), (unsigned)ESP.getFreeHeap());
 }
+
+/* ---------- Classe WiFi Dual Mode (AP + STA simultâneos) ---------- */
+class WiFiDualMode {
+public:
+  bool initAPSTA(String device_id) {
+    // Configura modo AP+STA
+    ap_ssid_current = String("Yaguts-") + device_id.substring(0, 8);
+    return startAccessPoint();
+  }
+  
+  bool startAccessPoint() {
+    if (ap_active) return true;
+    
+    WiFi.mode(WIFI_MODE_APSTA);  // ⭐ Dual mode: AP + STA
+    delay(100);
+    
+    bool ap_ok = WiFi.softAP(
+      ap_ssid_current.c_str(),
+      "yaguts123",              // Senha padrão
+      11,                       // Canal (menos interferência)
+      false,                    // SSID não oculta
+      2                         // Max 2 clientes
+    );
+    
+    if (ap_ok) {
+      WiFi.softAPConfig(
+        IPAddress(192, 168, 4, 1),    // Gateway
+        IPAddress(192, 168, 4, 1),    // Subnet
+        IPAddress(255, 255, 255, 0)   // Mask
+      );
+      ap_active = true;
+      Serial.printf("[APSTA] ✓ AP ativo: %s\n", ap_ssid_current.c_str());
+      Serial.printf("[APSTA]   IP Local: %s\n", WiFi.softAPIP().toString().c_str());
+      return true;
+    }
+    
+    Serial.println("[APSTA] ✗ Falha ao iniciar AP");
+    return false;
+  }
+  
+  bool connectToYaguts(const String& ssid, const String& password) {
+    if (ssid.length() == 0) {
+      Serial.println("[APSTA] ⚠ WiFi Yaguts não configurado");
+      return false;
+    }
+    
+    Serial.printf("[APSTA] 🔌 Conectando ao WiFi Yaguts: %s...\n", ssid.c_str());
+    
+    // Tenta conectar como cliente (STA)
+    WiFi.begin(ssid.c_str(), password.c_str());
+    
+    // Aguarda conexão (max 15 segundos)
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts++ < 30) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.println();
+    
+    if (WiFi.isConnected()) {
+      sta_connected = true;
+      Serial.printf("[APSTA] ✓ Conectado ao Yaguts: %s\n", WiFi.localIP().toString().c_str());
+      Serial.printf("[APSTA]   Sinal: %d dBm\n", WiFi.RSSI());
+      return true;
+    }
+    
+    sta_connected = false;
+    Serial.println("[APSTA] ⚠ Falha ao conectar ao Yaguts (AP permanece ativo)");
+    return false;
+  }
+  
+  void reconnectToYaguts() {
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("[APSTA] 🔄 Reconectando ao Yaguts...");
+      WiFi.reconnect();
+      delay(100);
+      
+      // Aguarda até 10 segundos
+      int attempts = 0;
+      while (WiFi.status() != WL_CONNECTED && attempts++ < 20) {
+        delay(500);
+        Serial.print(".");
+      }
+      Serial.println();
+      
+      if (WiFi.isConnected()) {
+        sta_connected = true;
+        Serial.printf("[APSTA] ✓ Reconectado ao Yaguts\n");
+      } else {
+        sta_connected = false;
+        Serial.println("[APSTA] ⚠ Reconexão falhou (AP continua ativo)");
+      }
+    }
+  }
+  
+  struct Status {
+    bool ap_active;
+    bool sta_connected;
+    String ap_ip;
+    String sta_ip;
+    int rssi;
+  };
+  
+  Status getStatus() {
+    Status s;
+    s.ap_active = ap_active;
+    s.sta_connected = (WiFi.status() == WL_CONNECTED);
+    s.ap_ip = WiFi.softAPIP().toString();
+    s.sta_ip = WiFi.localIP().toString();
+    s.rssi = WiFi.RSSI();
+    return s;
+  }
+};
+
+WiFiDualMode wifiDual;  // Instância global
 
 /* ---------- Modo Wi-Fi seguro ---------- */
 void wifiModeSafe(wifi_mode_t mode) {
@@ -193,6 +315,19 @@ void handleInfo() {
   server.send(200, "application/json", out);
 }
 
+void handleConnectivityStatus() {
+  auto status = wifiDual.getStatus();
+  StaticJsonDocument<256> doc;
+  doc["ap_active"] = status.ap_active;
+  doc["sta_connected"] = status.sta_connected;
+  doc["ap_ip"] = status.ap_ip;
+  doc["sta_ip"] = status.sta_ip;
+  doc["rssi"] = status.rssi;
+  doc["ap_ssid"] = ap_ssid_current;
+  String out; serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
 static bool isSixDigitsAllowEmpty(const String& s) {
   if (!s.length()) return true;
   if (s.length() != 6) return false;
@@ -234,6 +369,7 @@ void handleWipe() {
 void setupHttpHandlers() {
   server.on("/", handleRoot);
   server.on("/info", handleInfo);
+  server.on("/connectivity-status", handleConnectivityStatus);
   server.on("/save", HTTP_POST, handleSave);
   server.on("/wipe", handleWipe);
 }
@@ -333,18 +469,21 @@ int httpPOST(const String& path, const String &jsonBody, String &out) {
   return code;
 }
 
-/* ---------- Portal AP (liga só quando precisa) ---------- */
+/* ---------- Portal AP (Dual Mode - sempre ativo) ---------- */
 void startPortal() {
   if (portalActive) return;
-  wifiModeSafe(WIFI_AP);
-  String ssid = String("Yaguts-") + chipUID().substring(8);
-  WiFi.softAP(ssid.c_str());
-  delay(100);
-  dns.start(DNS_PORT, "*", WiFi.softAPIP());
-  portalActive = true;
-  ensureHttpStarted();     // <<<< inicia HTTP agora que o AP está de pé
-  state = ST_CONFIG_PORTAL;
-  Serial.printf("[PORTAL] AP '%s' em %s\n", ssid.c_str(), WiFi.softAPIP().toString().c_str());
+  
+  // Inicia Dual Mode (AP + STA)
+  if (wifiDual.initAPSTA(chipUID())) {
+    ap_active = true;
+    portalActive = true;
+    currentWiFiMode = WIFI_MODE_DUAL;
+    ensureHttpStarted();
+    state = ST_CONFIG_PORTAL;
+    Serial.printf("[PORTAL] Dual Mode iniciado. AP ativo em %s\n", WiFi.softAPIP().toString().c_str());
+  } else {
+    Serial.println("[PORTAL] ✗ Falha ao iniciar Dual Mode");
+  }
 }
 
 void stopPortal() {
@@ -352,27 +491,39 @@ void stopPortal() {
   dns.stop();
   WiFi.softAPdisconnect(true);
   portalActive = false;
+  ap_active = false;
 }
 
-/* ---------- STA ---------- */
+/* ---------- STA (com Dual Mode) ---------- */
 bool connectSTA(unsigned long timeoutMs = 20000) {
   if (!st_ssid.length()) return false;
-  wifiModeSafe(WIFI_STA);
+  
+  // Inicia Dual Mode se ainda não iniciado
+  if (!ap_active) {
+    Serial.println("[STA] Iniciando Dual Mode...");
+    wifiDual.initAPSTA(chipUID());
+    ap_active = true;
+    portalActive = true;
+    ensureHttpStarted();
+  }
+  
+  // Tenta conectar como cliente (STA)
+  Serial.printf("[STA] Conectando em '%s'...\n", st_ssid.c_str());
   WiFi.persistent(false);
   WiFi.setSleep(false);
-  WiFi.begin(st_ssid.c_str(), st_pass.c_str());
-  Serial.printf("[WIFI] Conectando em '%s' ...\n", st_ssid.c_str());
-  unsigned long t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < timeoutMs) {
-    delay(200); Serial.print(".");
-  }
-  Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.printf("[WIFI] OK. IP: %s RSSI:%d\n", WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
-    ensureHttpStarted();   // <<<< inicia HTTP agora que STA está ativa
+  
+  bool connected = wifiDual.connectToYaguts(st_ssid, st_pass);
+  
+  if (connected) {
+    Serial.printf("[STA] ✓ Conectado ao Yaguts: %s\n", WiFi.localIP().toString().c_str());
+    ensureHttpStarted();
+    sta_connected = true;
+    currentWiFiMode = WIFI_MODE_DUAL;
     return true;
   }
-  Serial.println("[WIFI] Falha.");
+  
+  Serial.println("[STA] ⚠ Falha ao conectar ao Yaguts (AP permanece ativo)");
+  sta_connected = false;
   return false;
 }
 
@@ -604,7 +755,7 @@ void loop() {
 
   if (portalSaved) {
     portalSaved = false;
-    stopPortal();
+    // Não para o AP, apenas tenta conectar ao Yaguts mantendo AP ativo
     state = ST_WIFI_CONNECT;
   }
 
@@ -615,31 +766,55 @@ void loop() {
 
     case ST_WIFI_CONNECT:
       if (connectSTA()) {
-        if (!st_token.length()) { if (!doClaim()) { startPortal(); break; } }
+        if (!st_token.length()) { if (!doClaim()) { Serial.println("[WIFI] Claim falhou, AP permanece ativo"); break; } }
         lastHeartbeat = 0; lastPoll = 0;
-        state = ST_ONLINE; Serial.println("[STATE] ONLINE");
+        state = ST_ONLINE; Serial.println("[STATE] ONLINE (com AP de fallback)");
       } else {
-        startPortal();
+        // Se falhar, tenta novamente em alguns segundos
+        delay(5000);
+        state = ST_WIFI_CONNECT;
       }
       break;
 
     case ST_ONLINE:
-      if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WIFI] Caiu. Tentando reconectar...");
-        state = ST_WIFI_CONNECT;
-        break;
+      {
+        // ===== Verifica conectividade Yaguts =====
+        unsigned long now = millis();
+        
+        // Se perdeu conexão Yaguts, tenta reconectar
+        if (WiFi.status() != WL_CONNECTED) {
+          sta_connected = false;
+          Serial.println("[LOOP] ⚠ WiFi Yaguts desconectou. Tentando reconectar...");
+          wifiDual.reconnectToYaguts();
+          
+          // Se ainda não conectado após reconexão, volta a ST_WIFI_CONNECT
+          if (WiFi.status() != WL_CONNECTED) {
+            state = ST_WIFI_CONNECT;
+            break;
+          }
+        } else {
+          sta_connected = true;
+        }
+        
+        // ===== NOVO: Retry de report se job pendente =====
+        if (g_currentJob.jobId && now - g_lastReportAttempt >= REPORT_RETRY_INTERVAL) {
+          Serial.println("[LOOP] Tentando reportar job pendente...");
+          reportJobCompletion();
+          g_lastReportAttempt = now;
+        }
+        
+        // ===== Heartbeat =====
+        if (now - lastHeartbeat >= HEARTBEAT_EVERY_MS) { 
+          sendHeartbeat(); 
+          lastHeartbeat = now; 
+        }
+        
+        // ===== Job Polling =====
+        if (now - lastPoll >= JOB_POLL_MS) { 
+          pollNextJob();  
+          lastPoll = now; 
+        }
       }
-      unsigned long now = millis();
-      
-      // ===== NOVO: Retry de report se job pendente =====
-      if (g_currentJob.jobId && now - g_lastReportAttempt >= REPORT_RETRY_INTERVAL) {
-        Serial.println("[LOOP] Tentando reportar job pendente...");
-        reportJobCompletion();
-        g_lastReportAttempt = now;
-      }
-      
-      if (now - lastHeartbeat >= HEARTBEAT_EVERY_MS) { sendHeartbeat(); lastHeartbeat = now; }
-      if (now - lastPoll >= JOB_POLL_MS)            { pollNextJob();  lastPoll = now; }
       delay(10);
       break;
   }
