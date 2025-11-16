@@ -1251,7 +1251,10 @@ async def websocket_job_monitor(
         except (JWTError, ValueError, TypeError):
             pass
     
-    # Valida que o job existe ANTES de aceitar conexão
+    # SEMPRE aceita a conexão primeiro (obrigatório)
+    await websocket.accept()
+    
+    # Valida que o job existe
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
         await websocket.close(code=4004, reason="Job not found")
@@ -1263,9 +1266,6 @@ async def websocket_job_monitor(
         if dono_id != current_user.id:
             await websocket.close(code=4003, reason="Job not owned by this user")
             return
-    
-    # ACEITA a conexão WebSocket
-    await websocket.accept()
     
     # Conecta ao manager
     await job_exec_manager.connect(job_id, websocket)
