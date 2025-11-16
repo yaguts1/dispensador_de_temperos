@@ -68,7 +68,6 @@ class JobExecutionManager:
         self.job_connections: Dict[int, Set[WebSocket]] = defaultdict(set)  # job_id -> set de WebSockets
     
     async def connect(self, job_id: int, ws: WebSocket):
-        await ws.accept()
         self.job_connections[job_id].add(ws)
         print(f"[WS] Cliente conectado ao job {job_id}. Total: {len(self.job_connections[job_id])}")
     
@@ -1253,21 +1252,27 @@ async def websocket_job_monitor(
     
     # SEMPRE aceita a conexão primeiro (obrigatório)
     await websocket.accept()
+    print(f"[WS] Conexão aceita para job {job_id}")
     
     # Valida que o job existe
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
+        print(f"[WS] Job {job_id} não encontrado, fechando com 4004")
         await websocket.close(code=4004, reason="Job not found")
         return
+    
+    print(f"[WS] Job {job_id} encontrado: {job.status}")
     
     # Se user logado, valida propriedade do job
     if current_user:
         dono_id = job.receita.dono_id if job.receita else job.user_id
         if dono_id != current_user.id:
+            print(f"[WS] Job {job_id} não pertence ao usuário {current_user.id}")
             await websocket.close(code=4003, reason="Job not owned by this user")
             return
     
     # Conecta ao manager
+    print(f"[WS] Conectando job {job_id} ao manager")
     await job_exec_manager.connect(job_id, websocket)
     
     try:
