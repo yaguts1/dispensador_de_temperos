@@ -432,7 +432,16 @@ button.dark:hover:not(:disabled) { background: #141b34; }
 }
 
 /* Ícones CSS */
-.icon-btn .icon { background: currentColor; }
+.icon-btn .icon { 
+  background: currentColor;
+  width: 20px;
+  height: 20px;
+  display: inline-block;
+}
+.icon-play{
+  -webkit-mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+          mask: url("./Assets/play-stream-svgrepo-com.svg") no-repeat center / contain;
+}
 .icon-edit{
   -webkit-mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
           mask: url("./Assets/pencil-svgrepo-com.svg") no-repeat center / contain;
