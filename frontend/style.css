@@ -870,3 +870,194 @@ button.with-icon .icon {
   min-width: 60px;
 }
 
+/* ===================== */
+/* Execution Monitor Modal */
+/* ===================== */
+.execution-modal {
+  min-width: min(90vw, 500px);
+  max-width: 600px;
+  max-height: 80vh;
+  padding: 0;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid rgba(79,124,255,.2);
+  border-radius: var(--radius);
+  box-shadow: 0 20px 60px rgba(0,0,0,.7);
+}
+
+.execution-modal::backdrop {
+  background: rgba(0,0,0,.75);
+  backdrop-filter: blur(6px);
+}
+
+.execution-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-lg);
+  border-bottom: 1px solid rgba(255,255,255,.1);
+  background: linear-gradient(135deg, rgba(79,124,255,.08) 0%, transparent 100%);
+}
+
+.execution-header h3 {
+  margin: 0;
+  font-size: 1.25rem;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.execution-header .icon-btn {
+  font-size: 1.5rem;
+  line-height: 1;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+}
+
+.execution-log {
+  padding: var(--space-lg);
+  max-height: 50vh;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  line-height: 1.8;
+  background: #0a0f1f;
+  border-top: 1px solid rgba(255,255,255,.05);
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+
+.execution-log:empty::before {
+  content: 'Aguardando logs de execução...';
+  display: block;
+  color: var(--muted);
+  font-style: italic;
+  text-align: center;
+  padding: var(--space-xl) 0;
+}
+
+.log-entry {
+  display: flex;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-sm);
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  transition: all var(--transition-fast);
+  animation: logEntryIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes logEntryIn {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.log-entry.done {
+  background: rgba(34,197,94,.08);
+  border-left-color: var(--success);
+}
+
+.log-entry.failed {
+  background: rgba(239,68,68,.08);
+  border-left-color: var(--danger);
+}
+
+.log-entry .status-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.log-entry .log-text {
+  flex: 1;
+  color: var(--ink);
+}
+
+.log-entry .error-detail {
+  color: var(--danger);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.execution-status {
+  padding: var(--space-lg);
+  font-weight: 700;
+  font-size: 0.95rem;
+  border-radius: 0 0 var(--radius) var(--radius);
+  text-align: center;
+  transition: all var(--transition-base);
+}
+
+.execution-status.connecting {
+  background: linear-gradient(135deg, rgba(79,124,255,.12) 0%, rgba(79,124,255,.05) 100%);
+  color: #cfe0ff;
+  border-top: 1px solid rgba(79,124,255,.2);
+}
+
+.execution-status.connected {
+  background: linear-gradient(135deg, rgba(79,124,255,.15) 0%, rgba(79,124,255,.08) 100%);
+  color: #e6ecff;
+  border-top: 1px solid rgba(79,124,255,.3);
+}
+
+.execution-status.success {
+  background: linear-gradient(135deg, rgba(34,197,94,.15) 0%, rgba(34,197,94,.08) 100%);
+  color: #bbf7d0;
+  border-top: 1px solid rgba(34,197,94,.3);
+}
+
+.execution-status.warning {
+  background: linear-gradient(135deg, rgba(245,158,11,.15) 0%, rgba(245,158,11,.08) 100%);
+  color: #fde68a;
+  border-top: 1px solid rgba(245,158,11,.3);
+}
+
+.execution-status.error {
+  background: linear-gradient(135deg, rgba(239,68,68,.15) 0%, rgba(239,68,68,.08) 100%);
+  color: #fecdd3;
+  border-top: 1px solid rgba(239,68,68,.3);
+}
+
+/* Scrollbar personalizada para log */
+.execution-log::-webkit-scrollbar {
+  width: 8px;
+}
+
+.execution-log::-webkit-scrollbar-track {
+  background: rgba(255,255,255,.03);
+  border-radius: 4px;
+}
+
+.execution-log::-webkit-scrollbar-thumb {
+  background: rgba(79,124,255,.3);
+  border-radius: 4px;
+  transition: background var(--transition-fast);
+}
+
+.execution-log::-webkit-scrollbar-thumb:hover {
+  background: rgba(79,124,255,.5);
+}
+
+@media (max-width: 640px) {
+  .execution-modal {
+    min-width: 95vw;
+  }
+  
+  .execution-header {
+    padding: var(--space-md);
+  }
+  
+  .execution-header h3 {
+    font-size: 1.1rem;
+  }
+  
+  .execution-log {
+    padding: var(--space-md);
+    font-size: 0.85rem;
+  }
+}
+

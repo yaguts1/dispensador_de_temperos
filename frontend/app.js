@@ -1639,38 +1639,41 @@ class App {
     
     // Cria um dialog para mostrar progresso
     const progressDlg = document.createElement('dialog');
-    progressDlg.className = 'card';
-    progressDlg.style.cssText = 'min-width: 400px; max-height: 80vh; overflow-y: auto;';
+    progressDlg.className = 'execution-modal';
     progressDlg.id = `job-progress-${job_id}`;
     
     const header = document.createElement('div');
+    header.className = 'execution-header';
     header.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3 style="margin: 0;">Executando Job #${job_id}</h3>
-        <button type="button" class="ghost" data-action="close" aria-label="Fechar">×</button>
-      </div>
+      <h3>Executando Job #${job_id}</h3>
+      <button type="button" class="icon-btn dark" data-action="close" aria-label="Fechar">×</button>
     `;
     
     const progressLog = document.createElement('div');
     progressLog.id = `progress-log-${job_id}`;
-    progressLog.style.cssText = 'border: 1px solid #ccc; border-radius: 8px; padding: 12px; background: #f9f9f9; font-family: monospace; font-size: 0.9em; max-height: 50vh; overflow-y: auto;';
+    progressLog.className = 'execution-log';
     
     const statusBar = document.createElement('div');
     statusBar.id = `status-bar-${job_id}`;
-    statusBar.style.cssText = 'margin-top: 16px; padding: 12px; background: #e8f5e9; border-radius: 8px;';
-    statusBar.innerHTML = 'Conectando ao monitor de execução...';
+    statusBar.className = 'execution-status connecting';
+    statusBar.innerHTML = '🔄 Conectando ao monitor de execução...';
     
     progressDlg.append(header, progressLog, statusBar);
     
     // Callbacks do monitor
     monitor.callbacks.onLogEntry = (entry) => {
-      const statusColor = entry.status === 'done' ? '#4caf50' : '#f44336';
-      const statusText = entry.status === 'done' ? '✅ OK' : '❌ FALHA';
-      const errorMsg = entry.error ? ` (${entry.error})` : '';
-      
       const line = document.createElement('div');
-      line.style.color = statusColor;
-      line.textContent = `Frasco ${entry.frasco}: ${entry.tempero} - ${entry.quantidade_g}g em ${entry.segundos.toFixed(1)}s ${statusText}${errorMsg}`;
+      line.className = `log-entry ${entry.status}`;
+      
+      const statusIcon = entry.status === 'done' ? '✅' : '❌';
+      const errorMsg = entry.error ? ` <span class="error-detail">(${entry.error})</span>` : '';
+      
+      line.innerHTML = `
+        <span class="status-icon">${statusIcon}</span>
+        <span class="log-text">Frasco ${entry.frasco}: ${entry.tempero} - ${entry.quantidade_g}g em ${entry.segundos.toFixed(1)}s</span>
+        ${errorMsg}
+      `;
+      
       progressLog.appendChild(line);
       progressLog.scrollTop = progressLog.scrollHeight;
     };
@@ -1680,7 +1683,6 @@ class App {
       
       const completedCount = result.itens_completados || 0;
       const failedCount = result.itens_falhados || 0;
-      const jobStatus = result.job_status || 'unknown';
       
       let finalMsg = `✅ Job concluído! ${completedCount} OK`;
       if (failedCount > 0) {
@@ -1691,7 +1693,7 @@ class App {
         finalMsg += ' | Estoque abatido';
       }
       
-      statusBar.style.background = failedCount === 0 ? '#e8f5e9' : '#fff3e0';
+      statusBar.className = failedCount === 0 ? 'execution-status success' : 'execution-status warning';
       statusBar.innerHTML = finalMsg;
       
       // Fecha dialog após 5s
@@ -1700,17 +1702,17 @@ class App {
     
     monitor.callbacks.onError = (error) => {
       console.error('[App] Erro na execução:', error);
-      statusBar.style.background = '#ffebee';
+      statusBar.className = 'execution-status error';
       statusBar.innerHTML = `❌ Erro: ${error.message || 'Desconexão inesperada'}`;
     };
     
     monitor.callbacks.onConnectionChange = (connected) => {
       if (connected) {
+        statusBar.className = 'execution-status connected';
         statusBar.innerHTML = '🔗 Conectado, aguardando execução do ESP32...';
-        statusBar.style.background = '#e3f2fd';
       } else {
+        statusBar.className = 'execution-status warning';
         statusBar.innerHTML = '⚠️ Desconectado do monitor';
-        statusBar.style.background = '#fff3e0';
       }
     };
     
