@@ -990,36 +990,59 @@ button.with-icon .icon {
   border-radius: 0 0 var(--radius) var(--radius);
   text-align: center;
   transition: all var(--transition-base);
+  border-top: 1px solid rgba(255,255,255,.08);
+  background: var(--surface-2);
+  color: var(--ink);
 }
 
 .execution-status.connecting {
-  background: linear-gradient(135deg, rgba(79,124,255,.12) 0%, rgba(79,124,255,.05) 100%);
-  color: #cfe0ff;
-  border-top: 1px solid rgba(79,124,255,.2);
+  background: linear-gradient(
+    135deg,
+    rgba(79,124,255,0.18) 0%,
+    rgba(11,16,32,1) 100%
+  );
+  color: #dbeafe;
+  border-top-color: rgba(79,124,255,0.5);
 }
 
 .execution-status.connected {
-  background: linear-gradient(135deg, rgba(79,124,255,.15) 0%, rgba(79,124,255,.08) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(79,124,255,0.25) 0%,
+    rgba(12,19,39,1) 100%
+  );
   color: #e6ecff;
-  border-top: 1px solid rgba(79,124,255,.3);
+  border-top-color: rgba(79,124,255,0.7);
 }
 
 .execution-status.success {
-  background: linear-gradient(135deg, rgba(34,197,94,.15) 0%, rgba(34,197,94,.08) 100%);
+  background: linear-gradient(
+    135deg,
+    rgba(34,197,94,0.22) 0%,
+    rgba(10,24,24,1) 100%
+  );
   color: #bbf7d0;
-  border-top: 1px solid rgba(34,197,94,.3);
+  border-top-color: rgba(34,197,94,0.6);
 }
 
 .execution-status.warning {
-  background: linear-gradient(135deg, rgba(245,158,11,.15) 0%, rgba(245,158,11,.08) 100%);
-  color: #fde68a;
-  border-top: 1px solid rgba(245,158,11,.3);
+  background: linear-gradient(
+    135deg,
+    rgba(245,158,11,0.22) 0%,
+    rgba(31,24,12,1) 100%
+  );
+  color: #fed7aa;
+  border-top-color: rgba(245,158,11,0.7);
 }
 
 .execution-status.error {
-  background: linear-gradient(135deg, rgba(239,68,68,.15) 0%, rgba(239,68,68,.08) 100%);
-  color: #fecdd3;
-  border-top: 1px solid rgba(239,68,68,.3);
+  background: linear-gradient(
+    135deg,
+    rgba(239,68,68,0.22) 0%,
+    rgba(31,12,15,1) 100%
+  );
+  color: #fecaca;
+  border-top-color: rgba(239,68,68,0.7);
 }
 
 /* Scrollbar personalizada para log */
