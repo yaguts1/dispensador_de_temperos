@@ -1230,7 +1230,6 @@ async def websocket_job_monitor(
     websocket: WebSocket,
     job_id: int,
     db: Session = Depends(get_db),
-    current_user: Optional[models.Usuario] = Depends(get_optional_user),
 ):
     """
     WebSocket para monitorar execução de job em tempo real.
@@ -1239,8 +1238,19 @@ async def websocket_job_monitor(
     - { type: "execution_log_entry", data: {frasco, status, ms, error}, timestamp }
     - { type: "execution_complete", data: {ok, stock_deducted, itens_completados, ...}, timestamp }
     
-    Autenticação: Usa get_optional_user (pode ser anônimo, validação via job ownership)
+    Autenticação: Opcional via cookie, validação de ownership do job
     """
+    # Autenticação manual via cookie (get_optional_user não funciona com WebSocket)
+    current_user = None
+    token = websocket.cookies.get(COOKIE_NAME)
+    if token:
+        try:
+            payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            uid = int(payload.get("sub"))
+            current_user = db.query(models.Usuario).filter(models.Usuario.id == uid).first()
+        except (JWTError, ValueError, TypeError):
+            pass
+    
     # Valida que o job existe
     job = db.query(models.Job).filter(models.Job.id == job_id).first()
     if not job:
