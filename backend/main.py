@@ -1035,8 +1035,6 @@ async def device_job_complete(
     - Oferece proteção contra duplicatas via idempotência
     - **NOVO**: Faz broadcast dos logs para clientes WebSocket conectados
     """
-    import asyncio
-    
     dev.last_seen = now_utc()
     
     job = (
