@@ -2,7 +2,7 @@
   ============================================================================
   YAGUTS DISPENSER - ESP32 MAIN
   
-  v0.1.5 - WiFi Dual Mode (APSTA) + Portal + API + Job Polling
+  v0.1.6 - WebSocket Integration + Complete POST Fix
   
   Arquitetura Multi-Tab:
   1. dispenser.ino (este arquivo) - WiFi Dual Mode, portal, heartbeat, polling
@@ -30,7 +30,7 @@
 #include "job_persistence.h"
 
 // ---------- Versão ----------
-#define FW_VERSION           "0.1.5"
+#define FW_VERSION           "0.1.6"
 
 // ---------- I2C Servo Driver (PCA9685) ----------
 #define SDA_PIN              21
@@ -651,6 +651,19 @@ bool executeJob(const String& json) {
 
 bool pollNextJob() {
   static int fails = 0;
+  
+  // ===== PRIORIDADE: Tentar reportar job pendente antes de buscar novo =====
+  if (g_currentJob.jobId > 0) {
+    Serial.printf("[POLL] ⚡ Job %d pendente, tentando reportar antes de buscar novo...\n", g_currentJob.jobId);
+    if (reportJobCompletion()) {
+      Serial.println("[POLL] ✓ Job pendente reportado com sucesso!");
+      // Job limpo, pode buscar novo
+    } else {
+      Serial.println("[POLL] ⚠ Falha ao reportar job pendente, não busca novo ainda");
+      return false;  // Não busca novo job até reportar o atual
+    }
+  }
+  
   String out; int code = httpGET("/devices/me/next_job", out);
   if (code <= 0) {
     fails++; Serial.printf("[POLL] erro %d (%d fails)\n", code, fails);
@@ -667,7 +680,7 @@ bool pollNextJob() {
     Serial.println("[POLL] ✓ Job recebido!");
     Serial.println(out);
     
-    // ===== NOVO: Salvar em Flash ANTES de executar (offline-first) =====
+    // ===== Salvar em Flash ANTES de executar (offline-first) =====
     StaticJsonDocument<4096> doc;
     if (!deserializeJson(doc, out)) {
       g_currentJob.jobId = doc["id"] | 0;
@@ -685,19 +698,30 @@ bool pollNextJob() {
       // Persiste em Flash
       saveJob(g_currentJob);
       Serial.printf("[POLL] Job %d salvo em Flash para execução offline\n", g_currentJob.jobId);
+      
+      // ===== Executar localmente (bloqueante) =====
+      bool execOk = executeJobOfflineWithPersistence();
+      
+      if (!execOk) {
+        Serial.println("[POLL] ✗ Falha na execução, mantém em Flash para retry");
+        return false;
+      }
+      
+      // ===== Reportar ao backend IMEDIATAMENTE após execução =====
+      Serial.println("[POLL] 📤 Reportando conclusão ao backend...");
+      bool reportOk = reportJobCompletion();
+      
+      if (reportOk) {
+        Serial.println("[POLL] ✅ Job executado e reportado com sucesso!");
+      } else {
+        Serial.println("[POLL] ⚠ Job executado mas falha ao reportar (retry automático)");
+      }
+      
+      return true;
+    } else {
+      Serial.println("[POLL] ✗ Erro ao parsear JSON do job");
+      return false;
     }
-    
-    // ===== NOVO: Executar localmente (online ou offline após isto) =====
-    bool execOk = executeJobOfflineWithPersistence();
-    
-    // ===== NOVO: Reportar ao backend (idempotência se falhar) =====
-    bool reportOk = reportJobCompletion();
-    
-    if (!execOk || !reportOk) {
-      Serial.printf("[POLL] Execução OK: %d, Report OK: %d (vai retry)\n", execOk, reportOk);
-    }
-    
-    return true;
   }
   Serial.printf("[POLL] HTTP %d\n", code); fails = 0; return false;
 }
@@ -836,23 +860,31 @@ void loop() {
           sta_connected = true;
         }
         
-        // ===== NOVO: Retry de report se job pendente =====
-        if (g_currentJob.jobId && now - g_lastReportAttempt >= REPORT_RETRY_INTERVAL) {
-          Serial.println("[LOOP] Tentando reportar job pendente...");
-          reportJobCompletion();
+        // ===== PRIORIDADE 1: Retry de report se job pendente =====
+        if (g_currentJob.jobId > 0 && now - g_lastReportAttempt >= REPORT_RETRY_INTERVAL) {
+          Serial.printf("[LOOP] ⏰ Retry: tentando reportar job %d pendente...\n", g_currentJob.jobId);
+          if (reportJobCompletion()) {
+            Serial.println("[LOOP] ✓ Job pendente reportado!");
+            lastPoll = 0;  // Força poll imediato para buscar próximo job
+          } else {
+            Serial.println("[LOOP] ⚠ Falha no retry, tenta novamente em 30s");
+          }
           g_lastReportAttempt = now;
         }
         
-        // ===== Heartbeat =====
+        // ===== PRIORIDADE 2: Heartbeat =====
         if (now - lastHeartbeat >= HEARTBEAT_EVERY_MS) { 
           sendHeartbeat(); 
           lastHeartbeat = now; 
         }
         
-        // ===== Job Polling =====
-        if (now - lastPoll >= JOB_POLL_MS) { 
+        // ===== PRIORIDADE 3: Job Polling (só se não houver job pendente) =====
+        if (g_currentJob.jobId == 0 && now - lastPoll >= JOB_POLL_MS) { 
           pollNextJob();  
           lastPoll = now; 
+        } else if (g_currentJob.jobId > 0) {
+          // Se tem job pendente, não busca novo
+          lastPoll = now;  // Reseta timer para não ficar spamming
         }
       }
       delay(10);
@@ -1006,6 +1038,12 @@ bool reportJobCompletion() {
     return false;
   }
   
+  // Verifica conectividade ANTES de tentar
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[REPORT] ⚠ WiFi desconectado, não pode reportar agora");
+    return false;
+  }
+  
   // Serializa log em JSON
   String logJson;
   serializeJson(g_executionLog, logJson);
@@ -1025,48 +1063,68 @@ bool reportJobCompletion() {
   String body;
   serializeJson(payload, body);
   
-  Serial.printf("[REPORT] Enviando relatório do job %d (tentativa)\n", 
-    g_currentJob.jobId);
+  Serial.println("[REPORT] ============================================");
+  Serial.printf("[REPORT] 📤 Enviando relatório do job %d\n", g_currentJob.jobId);
   Serial.printf("[REPORT] Completados: %d, Falhados: %d\n", 
     g_currentJob.itensConcluidos, g_currentJob.itensFalhados);
-  
-  // ===== DEBUG: Exibe payload =====
-  Serial.printf("[REPORT] Payload: %s\n", body.c_str());
-  Serial.printf("[REPORT] Payload length: %d bytes\n", body.length());
+  Serial.printf("[REPORT] Logs: %d entradas\n", g_executionLog.size());
   
   // POST /devices/me/jobs/{job_id}/complete
   String path = String("/devices/me/jobs/") + String(g_currentJob.jobId) + "/complete";
   
-  // ===== DEBUG: Exibe endpoint completo =====
+  // Debug endpoint
   ApiEndpoint ep = parseApi();
-  Serial.printf("[REPORT] Endpoint: %s://%s:%u%s\n", 
+  Serial.printf("[REPORT] 🌐 %s://%s:%u%s\n", 
     ep.https ? "https" : "http", ep.host.c_str(), ep.port, path.c_str());
-  Serial.printf("[REPORT] Token presente: %s\n", st_token.length() > 0 ? "SIM" : "NAO");
+  Serial.printf("[REPORT] 🔑 Token: %s\n", st_token.length() > 0 ? "presente" : "AUSENTE");
+  Serial.printf("[REPORT] 📦 Payload (%d bytes):\n%s\n", body.length(), body.c_str());
   
   String response;
   int code = httpPOST(path, body, response);
   
-  // ===== DEBUG: Exibe resposta detalhada =====
-  Serial.printf("[REPORT] HTTP Status Code: %d\n", code);
-  if (response.length() > 0) {
-    Serial.printf("[REPORT] Response Body: %s\n", response.c_str());
-    Serial.printf("[REPORT] Response Length: %d bytes\n", response.length());
-  }
+  Serial.printf("[REPORT] 📡 HTTP %d\n", code);
   
-  if (code == 200) {
-    Serial.println("[REPORT] ✓ Relatório enviado com sucesso!");
+  if (code == 200 || code == 201) {
+    Serial.println("[REPORT] ✅ Relatório enviado com sucesso!");
     Serial.printf("[REPORT] Response: %s\n", response.c_str());
     
     // Limpa job da Flash (foi processado)
     clearJob();
     g_executionLog.clear();
+    
+    // IMPORTANTE: Zera job DEPOIS de limpar Flash
     g_currentJob.jobId = 0;
+    g_currentJob.itensConcluidos = 0;
+    g_currentJob.itensFalhados = 0;
+    
+    Serial.println("[REPORT] ✓ Job limpo da memória e Flash");
+    Serial.println("[REPORT] ============================================");
     
     return true;
   }
   
-  Serial.printf("[REPORT] ✗ Falha ao reportar: HTTP %d\n", code);
-  Serial.printf("[REPORT] Mantendo job em Flash para retry posterior\n");
+  // Erros HTTP
+  Serial.printf("[REPORT] ✗ Falha: HTTP %d\n", code);
+  if (response.length() > 0) {
+    Serial.printf("[REPORT] Response: %s\n", response.c_str());
+  }
+  
+  // Erros específicos
+  if (code == 401) {
+    Serial.println("[REPORT] ⚠ Token inválido ou expirado!");
+  } else if (code == 404) {
+    Serial.println("[REPORT] ⚠ Job não encontrado no backend (já foi deletado?)");
+    // Limpa localmente se backend não tem mais o job
+    clearJob();
+    g_executionLog.clear();
+    g_currentJob.jobId = 0;
+    return true;  // Considera sucesso para não ficar em loop
+  } else if (code <= 0) {
+    Serial.println("[REPORT] ⚠ Erro de rede ou timeout");
+  }
+  
+  Serial.println("[REPORT] 💾 Mantendo job em Flash para retry");
+  Serial.println("[REPORT] ============================================");
   
   return false;
 }

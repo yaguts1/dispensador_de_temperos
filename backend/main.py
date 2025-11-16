@@ -1020,7 +1020,7 @@ def device_job_status(
 
 
 @app.post("/devices/me/jobs/{job_id}/complete", response_model=schemas.JobCompleteOut)
-def device_job_complete(
+async def device_job_complete(
     job_id: int,
     payload: schemas.JobCompleteIn,
     dev: models.Device = Depends(get_current_device),
@@ -1114,32 +1114,30 @@ def device_job_complete(
 
     db.commit()
     
-    # Faz broadcast de cada log entry para clientes WebSocket conectados
-    # (assíncrono em background, não bloqueia a resposta)
-    async def _broadcast_logs():
-        for log in payload.execution_logs:
-            await job_exec_manager.broadcast_log_entry(job_id, {
-                "frasco": log.frasco,
-                "tempero": log.tempero,
-                "quantidade_g": log.quantidade_g,
-                "segundos": log.segundos,
-                "status": log.status,
-                "error": log.error,
-            })
-        # Notifica conclusão
-        await job_exec_manager.broadcast_completion(job_id, {
-            "ok": True,
-            "stock_deducted": stock_deducted,
-            "itens_completados": job.itens_completados,
-            "itens_falhados": job.itens_falhados,
-            "job_status": job.status,
+    # ===== BROADCAST WEBSOCKET (agora funciona em async endpoint) =====
+    print(f"[WS] Broadcasting logs do job {job_id} para clientes conectados...")
+    
+    # Broadcast de cada log entry
+    for log in payload.execution_logs:
+        await job_exec_manager.broadcast_log_entry(job_id, {
+            "frasco": log.frasco,
+            "tempero": log.tempero,
+            "quantidade_g": log.quantidade_g,
+            "segundos": log.segundos,
+            "status": log.status,
+            "error": log.error,
         })
     
-    # Inicia em background (fire-and-forget)
-    try:
-        asyncio.create_task(_broadcast_logs())
-    except Exception as e:
-        print(f"[WARN] Falha ao fazer broadcast WS para job {job_id}: {e}")
+    # Broadcast de conclusão
+    await job_exec_manager.broadcast_completion(job_id, {
+        "ok": True,
+        "stock_deducted": stock_deducted,
+        "itens_completados": job.itens_completados,
+        "itens_falhados": job.itens_falhados,
+        "job_status": job.status,
+    })
+    
+    print(f"[WS] Broadcast concluído para job {job_id}")
     
     return schemas.JobCompleteOut(
         ok=True,
