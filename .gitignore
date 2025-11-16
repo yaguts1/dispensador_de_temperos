@@ -20,6 +20,13 @@ __pycache__/
 .env
 .env.local
 
+# Database (local only, não versionar)
+dispenser.db
+dispenser.db-shm
+dispenser.db-wal
+*.db
+*.db-journal
+
 # No documentation files
 *.md
 !LICENSE
