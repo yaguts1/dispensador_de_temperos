@@ -430,7 +430,11 @@ def criar_receita(
 
     itens = _valida_ingredientes(receita.ingredientes)
 
-    db_receita = models.Receita(nome=receita.nome, dono_id=current.id)
+    db_receita = models.Receita(
+        nome=receita.nome,
+        porcoes=receita.porcoes,
+        dono_id=current.id
+    )
     db.add(db_receita)
     db.commit()
     db.refresh(db_receita)
@@ -516,6 +520,7 @@ def atualizar_receita(
     itens = _valida_ingredientes(receita.ingredientes)
 
     db_receita.nome = receita.nome
+    db_receita.porcoes = receita.porcoes
 
     db.query(models.IngredienteReceita).filter(
         models.IngredienteReceita.receita_id == id
