@@ -31,6 +31,7 @@ class JobExecutionMonitor {
     this.reconnectTimer = null;
     this.shouldReconnect = true;
     this.manuallyClose = false;
+    this.completedSuccessfully = false; // Flag para indicar conclusão bem-sucedida
   }
 
   connect() {
@@ -71,6 +72,7 @@ class JobExecutionMonitor {
           this.callbacks.onLogEntry?.(msg.data);
         } else if (msg.type === 'execution_complete') {
           console.log(`[JobMonitor] Execução concluída:`, msg.data);
+          this.completedSuccessfully = true; // Marca como concluído com sucesso
           this.callbacks.onCompletion?.(msg.data);
           this.shouldReconnect = false; // Job finalizado, não reconectar
           // Frontend fecha após processar a mensagem
@@ -92,7 +94,11 @@ class JobExecutionMonitor {
     this.ws.onclose = (event) => {
       console.log(`[JobMonitor] WebSocket fechado (code: ${event.code}, reason: ${event.reason})`);
       clearInterval(this._heartbeatInterval);
-      this.callbacks.onConnectionChange?.(false);
+      
+      // Não notifica desconexão se foi conclusão bem-sucedida
+      if (!this.completedSuccessfully) {
+        this.callbacks.onConnectionChange?.(false);
+      }
       
       // Circuit breaker: para após max tentativas
       if (this.reconnectAttempts >= this.maxReconnectAttempts) {
