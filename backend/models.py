@@ -92,6 +92,36 @@ class ReservatorioConfig(Base):
 
 
 # =========================
+# Configuração do Motor (por usuário)
+# =========================
+class MotorConfig(Base):
+    __tablename__ = "motor_config"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_motor_user"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("usuarios.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Intensidade de vibração (0-100%)
+    vibration_intensity = Column(Integer, nullable=False, default=75)
+
+    # Delays em milissegundos
+    pre_start_delay_ms = Column(Integer, nullable=False, default=500)   # Antes de abrir servos
+    post_stop_delay_ms = Column(Integer, nullable=False, default=300)   # Após fechar servos
+
+    # Timeout de segurança (segundos)
+    max_runtime_sec = Column(Integer, nullable=False, default=300)  # 5 minutos
+
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    dono = relationship("Usuario", backref="motor_config")
+
+
+# =========================
 # Dispositivos (ESP32)
 # =========================
 class Device(Base):

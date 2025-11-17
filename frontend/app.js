@@ -696,6 +696,48 @@ class App {
       });
     }
 
+    // Motor - Vibration slider
+    const vibrationIntensity = document.getElementById('vibrationIntensity');
+    const vibrationValue = document.getElementById('vibrationValue');
+    if (vibrationIntensity && vibrationValue) {
+      this._addListener(vibrationIntensity, 'input', (e) => {
+        vibrationValue.textContent = e.target.value;
+      });
+    }
+
+    // Motor - Save button
+    const btnSaveMotor = document.getElementById('btnSaveMotor');
+    if (btnSaveMotor) {
+      this._addListener(btnSaveMotor, 'click', async () => {
+        if (!this.ensureAuthOrPrompt()) return;
+        await this.saveMotorConfig();
+      });
+    }
+
+    // Motor - Test button
+    const btnTestMotor = document.getElementById('btnTestMotor');
+    if (btnTestMotor) {
+      this._addListener(btnTestMotor, 'click', async () => {
+        if (!this.ensureAuthOrPrompt()) return;
+        await this.testMotor();
+      });
+    }
+
+    // Motor - Load config when Robô tab opens
+    const motorConfigSection = document.getElementById('motorConfigSection');
+    if (motorConfigSection) {
+      const observer = new MutationObserver((mutations) => {
+        for (const mutation of mutations) {
+          if (mutation.attributeName === 'open' && motorConfigSection.hasAttribute('open')) {
+            if (this.user) this.loadMotorConfig();
+            observer.disconnect(); // Carregar apenas uma vez
+            break;
+          }
+        }
+      });
+      observer.observe(motorConfigSection, { attributes: true });
+    }
+
     // Consulta: busca ao digitar + Enter + Botão
     if (this.els.buscaNome) {
       this._addListener(this.els.buscaNome, 'input', () => this.handleLiveInputDebounced());
@@ -1432,6 +1474,83 @@ class App {
       // Falha ao buscar devices - esconde banner
       console.warn('[DeviceStatus] Erro ao buscar status:', error);
       banner.hidden = true;
+    }
+  }
+
+  // ================== Motor Config ==================
+  async loadMotorConfig() {
+    try {
+      const data = await jfetch(`${API_URL}/config/motor`);
+      
+      // Preencher campos da UI
+      const vibrationIntensity = document.getElementById('vibrationIntensity');
+      const vibrationValue = document.getElementById('vibrationValue');
+      const preStartDelay = document.getElementById('preStartDelay');
+      const postStopDelay = document.getElementById('postStopDelay');
+      const maxRuntime = document.getElementById('maxRuntime');
+      
+      if (vibrationIntensity && data.vibration_intensity !== undefined) {
+        vibrationIntensity.value = data.vibration_intensity;
+        if (vibrationValue) vibrationValue.textContent = data.vibration_intensity;
+      }
+      if (preStartDelay && data.pre_start_delay_ms !== undefined) {
+        preStartDelay.value = data.pre_start_delay_ms;
+      }
+      if (postStopDelay && data.post_stop_delay_ms !== undefined) {
+        postStopDelay.value = data.post_stop_delay_ms;
+      }
+      if (maxRuntime && data.max_runtime_sec !== undefined) {
+        maxRuntime.value = data.max_runtime_sec;
+      }
+      
+      console.log('[Motor] Configuração carregada:', data);
+    } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
+      console.error('[Motor] Falha ao carregar configuração:', e);
+      this.toast(e.message || 'Falha ao carregar configuração do motor', 'err');
+    }
+  }
+
+  async saveMotorConfig() {
+    try {
+      const vibrationIntensity = document.getElementById('vibrationIntensity');
+      const preStartDelay = document.getElementById('preStartDelay');
+      const postStopDelay = document.getElementById('postStopDelay');
+      const maxRuntime = document.getElementById('maxRuntime');
+      
+      const payload = {
+        vibration_intensity: Number(vibrationIntensity?.value || 75),
+        pre_start_delay_ms: Number(preStartDelay?.value || 500),
+        post_stop_delay_ms: Number(postStopDelay?.value || 300),
+        max_runtime_sec: Number(maxRuntime?.value || 300),
+      };
+      
+      await jfetch(`${API_URL}/config/motor`, {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      });
+      
+      this.toast('Configuração do motor salva!', 'ok');
+      console.log('[Motor] Configuração salva:', payload);
+    } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
+      console.error('[Motor] Falha ao salvar configuração:', e);
+      this.toast(e?.data?.detail || e.message || 'Falha ao salvar configuração do motor', 'err');
+    }
+  }
+
+  async testMotor() {
+    try {
+      // Por enquanto apenas mostra feedback - no futuro pode chamar endpoint /config/motor/test
+      this.toast('Teste de vibração: 3 segundos (funcionalidade em desenvolvimento)', 'ok');
+      console.log('[Motor] Teste de vibração solicitado');
+      
+      // TODO: Implementar endpoint backend para teste de motor
+      // await jfetch(`${API_URL}/config/motor/test`, { method: 'POST' });
+    } catch (e) {
+      if (e.status === 401) return this.openAuthDialog('login');
+      console.error('[Motor] Falha ao testar motor:', e);
+      this.toast(e?.data?.detail || e.message || 'Falha ao testar motor', 'err');
     }
   }
 

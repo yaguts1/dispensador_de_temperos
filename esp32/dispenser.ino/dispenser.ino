@@ -26,9 +26,10 @@
 // Includes locais
 #include "yaguts_types.h"
 #include "job_persistence.h"
+#include "MotorController.h"
 
 // ---------- Versão ----------
-#define FW_VERSION           "0.1.4"
+#define FW_VERSION           "0.1.5"  // Adicionado suporte a motor de vibração
 
 // ---------- API ----------
 #define DEFAULT_API_HOST     "api.yaguts.com.br"
@@ -50,6 +51,11 @@ static const char *LE_ISRG_ROOT_X1 =
 const int PIN_RES[4] = { 26, 27, 32, 33 };
 const bool RELAY_ACTIVE_HIGH = true;
 const unsigned long MAX_STEP_MS = 180000UL;
+
+// Motor de vibração (L298N)
+const int MOTOR_ENA_PIN = 25;  // PWM (Enable A)
+const int MOTOR_IN1_PIN = 14;  // Direção 1
+const int MOTOR_IN2_PIN = 12;  // Direção 2
 
 // ---------- Timings ----------
 unsigned long HEARTBEAT_EVERY_MS = 30000;
@@ -77,6 +83,9 @@ String st_ssid, st_pass, st_token, st_api, st_claim;
 // ---------- Estado ----------
 enum RunState { ST_CONFIG_PORTAL, ST_WIFI_CONNECT, ST_ONLINE };
 RunState state = ST_WIFI_CONNECT;
+
+// ---------- Motor Controller ----------
+MotorController motor(MOTOR_ENA_PIN, MOTOR_IN1_PIN, MOTOR_IN2_PIN);
 
 // ---------- Job em Execução (offline-first) ----------
 // Definidas em job_execution.ino (declaradas globais)
@@ -534,6 +543,7 @@ void setup() {
   Serial.printf("UID: %s  MAC: %s  FW: %s\n", chipUID().c_str(), macAddr().c_str(), FW_VERSION);
 
   setupPins();
+  motor.begin();  // Inicializa motor de vibração
   loadPrefs();
 
   // ===== NOVO: Tentar retomar job anterior (offline-first recovery) =====
@@ -580,6 +590,11 @@ void loop() {
         break;
       }
       unsigned long now = millis();
+      
+      // ===== Verificar timeout do motor (segurança) =====
+      if (motor.isRunning()) {
+        motor.checkTimeout();
+      }
       
       // ===== NOVO: Retry de report se job pendente =====
       if (g_currentJob.jobId && now - g_lastReportAttempt >= REPORT_RETRY_INTERVAL) {
@@ -655,13 +670,46 @@ bool executeJobOfflineWithPersistence() {
       g_currentJob.totalItens, itens.size());
   }
   
+  // ========== PARSEAR MOTOR CONFIG ==========
+  JsonObject motorCfg = jobDoc["motor_config"].as<JsonObject>();
+  int vibrationIntensity = 75;      // Padrão
+  int preStartDelayMs = 500;
+  int postStopDelayMs = 300;
+  int maxRuntimeSec = 300;
+  
+  if (!motorCfg.isNull()) {
+    vibrationIntensity = motorCfg["vibration_intensity"] | 75;
+    preStartDelayMs = motorCfg["pre_start_delay_ms"] | 500;
+    postStopDelayMs = motorCfg["post_stop_delay_ms"] | 300;
+    maxRuntimeSec = motorCfg["max_runtime_sec"] | 300;
+    
+    Serial.printf("[EXEC] Motor config: intensidade=%d%%, pre_delay=%dms, post_delay=%dms, timeout=%ds\n",
+      vibrationIntensity, preStartDelayMs, postStopDelayMs, maxRuntimeSec);
+  } else {
+    Serial.println("[EXEC] ⚠ motor_config ausente, usando padrões");
+  }
+  
+  // Configura motor
+  motor.setIntensity(vibrationIntensity);
+  motor.setMaxRuntime(maxRuntimeSec);
+  
   // Clear log anterior
   g_executionLog.clear();
   
   unsigned long execStartTime = millis();
   
+  // ========== INICIA MOTOR (PRÉ-DISPENSAÇÃO) ==========
+  if (vibrationIntensity > 0 && itens.size() > 0) {
+    motor.start(preStartDelayMs);
+  }
+  
   // =============== LOOP DE EXECUÇÃO ===============
   for (int i = g_currentJob.itensConcluidos; i < itens.size(); i++) {
+    
+    // Verifica timeout do motor a cada item
+    if (motor.isRunning()) {
+      motor.checkTimeout();
+    }
     
     JsonObject item = itens[i];
     int frasco = item["frasco"] | 0;
@@ -697,7 +745,7 @@ bool executeJobOfflineWithPersistence() {
       ms = MAX_STEP_MS;
     }
     
-    // ========== EXECUTA RELÉ ==========
+    // ========== EXECUTA RELÉ (MOTOR CONTINUA VIBRANDO) ==========
     Serial.printf("[EXEC] Item %d/%d: Frasco %d por %.3fs\n", 
       i + 1, itens.size(), frasco, segundos);
     
@@ -720,6 +768,11 @@ bool executeJobOfflineWithPersistence() {
       i + 1, realSeconds);
   }
   // =============== FIM LOOP ===============
+  
+  // ========== PARA MOTOR (PÓS-DISPENSAÇÃO) ==========
+  if (motor.isRunning()) {
+    motor.stop(postStopDelayMs);
+  }
   
   unsigned long totalDuration = millis() - execStartTime;
   Serial.printf("[EXEC] ========== Execução concluída em %.2fs ==========\n", 

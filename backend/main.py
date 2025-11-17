@@ -430,8 +430,6 @@ def criar_receita(
 
     itens = _valida_ingredientes(receita.ingredientes)
 
-    print(f"[DEBUG] Criando receita: nome={receita.nome}, porcoes={receita.porcoes}")
-    
     db_receita = models.Receita(
         nome=receita.nome,
         porcoes=receita.porcoes,
@@ -440,8 +438,6 @@ def criar_receita(
     db.add(db_receita)
     db.commit()
     db.refresh(db_receita)
-    
-    print(f"[DEBUG] Receita salva: id={db_receita.id}, porcoes={db_receita.porcoes}")
 
     for ing in itens:
         db.add(
@@ -523,8 +519,6 @@ def atualizar_receita(
 
     itens = _valida_ingredientes(receita.ingredientes)
 
-    print(f"[DEBUG] Atualizando receita {id}: nome={receita.nome}, porcoes={receita.porcoes}")
-    
     db_receita.nome = receita.nome
     db_receita.porcoes = receita.porcoes
 
@@ -691,6 +685,58 @@ def put_config_robo(
 
     db.commit()
     return result
+
+
+# ---------------------------------------------------------------------
+# Configuração do Motor (por usuário)
+# ---------------------------------------------------------------------
+@app.get("/config/motor", response_model=schemas.MotorConfigOut)
+def get_motor_config(
+    db: Session = Depends(get_db),
+    current: models.Usuario = Depends(get_current_user),
+):
+    """Retorna configuração do motor do usuário (cria default se não existir)"""
+    config = (
+        db.query(models.MotorConfig)
+        .filter(models.MotorConfig.user_id == current.id)
+        .first()
+    )
+    
+    if not config:
+        # Cria configuração default
+        config = models.MotorConfig(user_id=current.id)
+        db.add(config)
+        db.commit()
+        db.refresh(config)
+    
+    return config
+
+
+@app.put("/config/motor", response_model=schemas.MotorConfigOut)
+def update_motor_config(
+    config_in: schemas.MotorConfigIn,
+    db: Session = Depends(get_db),
+    current: models.Usuario = Depends(get_current_user),
+):
+    """Atualiza configuração do motor"""
+    config = (
+        db.query(models.MotorConfig)
+        .filter(models.MotorConfig.user_id == current.id)
+        .first()
+    )
+    
+    if not config:
+        config = models.MotorConfig(user_id=current.id)
+        db.add(config)
+    
+    config.vibration_intensity = config_in.vibration_intensity
+    config.pre_start_delay_ms = config_in.pre_start_delay_ms
+    config.post_stop_delay_ms = config_in.post_stop_delay_ms
+    config.max_runtime_sec = config_in.max_runtime_sec
+    
+    db.commit()
+    db.refresh(config)
+    return config
 
 
 # ---------------------------------------------------------------------
@@ -971,9 +1017,54 @@ def device_next_job(
     # Apenas marca started_at quando o job é retornado
     if not job.started_at:
         job.started_at = now_utc()
+    
+    # NOVO: Buscar configuração do motor do usuário
+    motor_config = (
+        db.query(models.MotorConfig)
+        .filter(models.MotorConfig.user_id == dev.user_id)
+        .first()
+    )
+    
     db.commit()
     db.refresh(job)
-    return job
+    
+    # NOVO: Adicionar motor_config ao response
+    job_dict = {
+        "id": job.id,
+        "status": job.status,
+        "receita_id": job.receita_id,
+        "pessoas_solicitadas": job.pessoas_solicitadas,
+        "multiplicador": job.multiplicador,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "erro_msg": job.erro_msg,
+        "itens": [
+            {
+                "id": it.id,
+                "ordem": it.ordem,
+                "frasco": it.frasco,
+                "tempero": it.tempero,
+                "quantidade_g": it.quantidade_g,
+                "segundos": it.segundos,
+                "status": it.status,
+            }
+            for it in job.itens
+        ],
+        "motor_config": {
+            "vibration_intensity": motor_config.vibration_intensity,
+            "pre_start_delay_ms": motor_config.pre_start_delay_ms,
+            "post_stop_delay_ms": motor_config.post_stop_delay_ms,
+            "max_runtime_sec": motor_config.max_runtime_sec,
+        } if motor_config else {
+            "vibration_intensity": 75,
+            "pre_start_delay_ms": 500,
+            "post_stop_delay_ms": 300,
+            "max_runtime_sec": 300,
+        },
+    }
+    
+    return job_dict
 
 
 @app.post("/devices/me/jobs/{job_id}/status")

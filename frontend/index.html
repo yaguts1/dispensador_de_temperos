@@ -270,6 +270,81 @@
             <button type="button" id="btnRecarregarRobo" class="ghost">Recarregar</button>
           </div>
         </fieldset>
+
+        <!-- Configuração do Motor (Colapsável) -->
+        <details id="motorConfigSection" class="motor-config-details">
+          <summary>
+            <span class="icon-wrapper">🔧</span>
+            <span class="summary-text">Controle de Vibração (Motor)</span>
+            <span class="hint-inline">— Ajuste a intensidade da vibração</span>
+          </summary>
+          
+          <fieldset style="border: none; padding: 0; margin-top: var(--space-lg);">
+            <div class="motor-config-content">
+              <p class="hint">
+                O motor de vibração ajuda o tempero a fluir melhor. Ajuste a intensidade conforme a textura dos temperos.
+              </p>
+
+              <!-- Slider de Intensidade -->
+              <div class="vibration-control">
+                <label for="vibrationIntensity">
+                  Intensidade da Vibração
+                  <output id="vibrationValue" class="vibration-value">75</output>%
+                </label>
+                <input 
+                  id="vibrationIntensity" 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value="75"
+                  step="5"
+                  class="vibration-slider"
+                />
+                <div class="slider-labels">
+                  <span>0%</span>
+                  <span>25%</span>
+                  <span>50%</span>
+                  <span>75%</span>
+                  <span>100%</span>
+                </div>
+              </div>
+
+              <!-- Configurações Avançadas (Nested Details) -->
+              <details class="advanced-settings">
+                <summary>⚙️ Configurações Avançadas</summary>
+                
+                <div class="advanced-grid">
+                  <div>
+                    <label for="preStartDelay">Delay pré-dispensação (ms)</label>
+                    <input id="preStartDelay" type="number" value="500" min="0" max="5000" step="100" />
+                    <small class="form-hint">Tempo que o motor vibra antes de abrir comportas</small>
+                  </div>
+
+                  <div>
+                    <label for="postStopDelay">Delay pós-dispensação (ms)</label>
+                    <input id="postStopDelay" type="number" value="300" min="0" max="5000" step="100" />
+                    <small class="form-hint">Tempo de vibração após fechar comportas</small>
+                  </div>
+
+                  <div>
+                    <label for="maxRuntime">Timeout máximo (segundos)</label>
+                    <input id="maxRuntime" type="number" value="300" min="30" max="600" step="30" />
+                    <small class="form-hint">Desliga automaticamente após este tempo (segurança)</small>
+                  </div>
+                </div>
+              </details>
+
+              <!-- Botões de Ação -->
+              <div class="actions" style="margin-top: var(--space-lg);">
+                <button type="button" id="btnTestMotor" class="ghost with-icon">
+                  <span class="icon icon-play" aria-hidden="true"></span>
+                  <span>Testar Vibração (3s)</span>
+                </button>
+                <button type="button" id="btnSaveMotor" class="primary">Salvar Motor</button>
+              </div>
+            </div>
+          </fieldset>
+        </details>
       </form>
     </section>
   </main>

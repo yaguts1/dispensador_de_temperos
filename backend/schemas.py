@@ -100,6 +100,23 @@ class ReservatorioConfigOut(ReservatorioConfigIn):
 
 
 # =========================
+# Configuração do Motor
+# =========================
+class MotorConfigIn(BaseModel):
+    vibration_intensity: int = Field(default=75, ge=0, le=100, description="Intensidade de vibração (0-100%)")
+    pre_start_delay_ms: int = Field(default=500, ge=0, le=5000, description="Delay antes de abrir servos (ms)")
+    post_stop_delay_ms: int = Field(default=300, ge=0, le=5000, description="Delay após fechar servos (ms)")
+    max_runtime_sec: int = Field(default=300, ge=30, le=600, description="Timeout máximo de execução (s)")
+
+
+class MotorConfigOut(MotorConfigIn):
+    id: int
+    user_id: int
+    updated_at: Optional[datetime] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+# =========================
 # Jobs
 # =========================
 class JobCreateIn(BaseModel):
@@ -131,6 +148,7 @@ class JobOut(BaseModel):
     finished_at: Optional[datetime] = None
     erro_msg: Optional[str] = None
     itens: List[JobItemOut] = []
+    motor_config: Optional[MotorConfigIn] = None  # NOVO: Configuração de motor enviada ao ESP32
     model_config = ConfigDict(from_attributes=True)
 
 
