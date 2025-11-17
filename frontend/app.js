@@ -1357,6 +1357,10 @@ class App {
       this.robotCfgIndex = this._indexRobotCfg(this.robotCfg);
       this._fillRobotFields(this.robotCfg);
       this.state.roboLoaded = true;
+      
+      // Atualiza banner de status dos devices
+      await this._updateDeviceStatusBanner();
+      
       if (forceToast) this.toast('Configuração carregada.', 'ok');
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
@@ -1376,6 +1380,58 @@ class App {
     } catch (e) {
       if (e.status === 401) return this.openAuthDialog('login');
       this.toast(e?.data?.detail || e.message || 'Falha ao salvar configuração', 'err');
+    }
+  }
+
+  /**
+   * Atualiza o banner informativo de status dos devices vinculados
+   */
+  async _updateDeviceStatusBanner() {
+    const banner = document.getElementById('deviceStatusBanner');
+    if (!banner) return;
+
+    try {
+      const devicesData = await jfetch(`${API_URL}/me/devices`);
+      
+      const hasDevices = devicesData?.devices?.length > 0;
+      const isOnline = devicesData?.online_any === true;
+      
+      banner.hidden = false;
+      banner.className = 'device-status-banner';
+      
+      if (!hasDevices) {
+        // Nenhum device vinculado
+        banner.classList.add('no-device');
+        banner.querySelector('.banner-icon').textContent = '⚠️';
+        banner.querySelector('.banner-title').textContent = 'Nenhum robô vinculado';
+        banner.querySelector('.banner-text').innerHTML = `
+          Para começar, clique em <strong>"Adicionar máquina"</strong> abaixo. 
+          Um código será gerado. No ESP32, conecte ao Wi-Fi do dispenser, 
+          configure sua rede Wi-Fi e informe o código para vincular.
+        `;
+      } else if (isOnline) {
+        // Device online
+        const deviceCount = devicesData.devices.length;
+        const deviceWord = deviceCount === 1 ? 'máquina' : 'máquinas';
+        banner.classList.add('online');
+        banner.querySelector('.banner-icon').textContent = '✅';
+        banner.querySelector('.banner-title').textContent = `Robô Online (${deviceCount} ${deviceWord})`;
+        banner.querySelector('.banner-text').textContent = 
+          `Seu dispenser está conectado e pronto para executar receitas! Configure os reservatórios abaixo.`;
+      } else {
+        // Device offline
+        const deviceCount = devicesData.devices.length;
+        const deviceWord = deviceCount === 1 ? 'máquina' : 'máquinas';
+        banner.classList.add('offline');
+        banner.querySelector('.banner-icon').textContent = '🔌';
+        banner.querySelector('.banner-title').textContent = `Robô Offline (${deviceCount} ${deviceWord} vinculada${deviceCount > 1 ? 's' : ''})`;
+        banner.querySelector('.banner-text').textContent = 
+          `Seu dispenser está vinculado, mas não conectou nos últimos 90 segundos. Verifique se está ligado e com Wi-Fi.`;
+      }
+    } catch (error) {
+      // Falha ao buscar devices - esconde banner
+      console.warn('[DeviceStatus] Erro ao buscar status:', error);
+      banner.hidden = true;
     }
   }
 
