@@ -430,6 +430,8 @@ def criar_receita(
 
     itens = _valida_ingredientes(receita.ingredientes)
 
+    print(f"[DEBUG] Criando receita: nome={receita.nome}, porcoes={receita.porcoes}")
+    
     db_receita = models.Receita(
         nome=receita.nome,
         porcoes=receita.porcoes,
@@ -438,6 +440,8 @@ def criar_receita(
     db.add(db_receita)
     db.commit()
     db.refresh(db_receita)
+    
+    print(f"[DEBUG] Receita salva: id={db_receita.id}, porcoes={db_receita.porcoes}")
 
     for ing in itens:
         db.add(
@@ -519,6 +523,8 @@ def atualizar_receita(
 
     itens = _valida_ingredientes(receita.ingredientes)
 
+    print(f"[DEBUG] Atualizando receita {id}: nome={receita.nome}, porcoes={receita.porcoes}")
+    
     db_receita.nome = receita.nome
     db_receita.porcoes = receita.porcoes
 
