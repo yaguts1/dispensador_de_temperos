@@ -112,9 +112,8 @@ class JobExecutionManager:
                     "data": result,
                     "timestamp": iso_utc(now_utc()),
                 })
-                # Pequeno delay para garantir que mensagem foi processada antes de fechar
-                await asyncio.sleep(0.1)
-                await ws.close(code=1000, reason="Job completed")
+                # Não fecha aqui - deixa o frontend fechar após processar
+                print(f"[WS] Notificação de conclusão enviada para job {job_id}")
             except Exception as e:
                 print(f"[WS] Erro ao notificar conclusão (job {job_id}): {e}")
                 disconnected.append(ws)

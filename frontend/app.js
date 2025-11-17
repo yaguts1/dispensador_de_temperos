@@ -73,7 +73,8 @@ class JobExecutionMonitor {
           console.log(`[JobMonitor] Execução concluída:`, msg.data);
           this.callbacks.onCompletion?.(msg.data);
           this.shouldReconnect = false; // Job finalizado, não reconectar
-          this.close();
+          // Frontend fecha após processar a mensagem
+          setTimeout(() => this.close(), 100);
         } else if (msg.type === 'pong') {
           // Heartbeat response, ignore
         }
@@ -1660,8 +1661,17 @@ class App {
     
     progressDlg.append(header, progressLog, statusBar);
     
-    // Callbacks do monitor
-    monitor.callbacks.onLogEntry = (entry) => {
+    // Fila para suavizar exibição de logs (caso múltiplos cheguem juntos)
+    let logQueue = [];
+    let processingQueue = false;
+    
+    const processLogQueue = () => {
+      if (logQueue.length === 0) {
+        processingQueue = false;
+        return;
+      }
+      
+      const entry = logQueue.shift();
       const line = document.createElement('div');
       line.className = `log-entry ${entry.status}`;
       
@@ -1676,6 +1686,18 @@ class App {
       
       progressLog.appendChild(line);
       progressLog.scrollTop = progressLog.scrollHeight;
+      
+      // Processa próximo log após pequeno delay para efeito visual
+      setTimeout(() => processLogQueue(), 150);
+    };
+    
+    // Callbacks do monitor
+    monitor.callbacks.onLogEntry = (entry) => {
+      logQueue.push(entry);
+      if (!processingQueue) {
+        processingQueue = true;
+        processLogQueue();
+      }
     };
     
     monitor.callbacks.onCompletion = (result) => {
